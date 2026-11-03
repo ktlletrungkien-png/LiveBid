@@ -1,0 +1,12 @@
+# Tài liệu nội bộ của nhóm (không đưa lên repo)
+/KE_HOACH_DAU_GIA_DA_GIAO_THUC.md
+
+# IDE / công cụ
+.github/modernize/
+.idea/
+.vscode/
+*.iml
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db
