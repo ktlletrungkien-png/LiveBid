@@ -1,0 +1,5 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: #1f2933; background: #f5f7fa; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: #1f2933; color: #fff; }
+header h1 { margin: 0; font-size: 1.25rem; }
+main { max-width: 960px; margin: 24px auto; padding: 0 16px; }

@@ -1,0 +1,16 @@
+# Sao chép thành server.properties rồi chỉnh theo máy của bạn (file .properties không được commit).
+server.host=0.0.0.0
+server.tcpPort=5000
+server.httpPort=8080
+server.udpDiscoveryPort=5001
+server.multicastGroup=239.255.42.99
+server.multicastPort=5002
+settlement.rmiHost=127.0.0.1
+settlement.rmiPort=1099
+database.path=./data/auction.db
+network.maxMessageBytes=65536
+network.heartbeatIntervalSeconds=15
+network.idleTimeoutSeconds=45
+auction.antiSnipingWindowSeconds=10
+auction.antiSnipingExtensionSeconds=30
+auction.antiSnipingMaxExtensions=10

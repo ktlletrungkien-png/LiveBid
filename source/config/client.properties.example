@@ -1,0 +1,8 @@
+# Sao chép thành client.properties. Để trống server.host để tìm server bằng UDP broadcast.
+server.host=
+server.tcpPort=5000
+udp.discoveryPort=5001
+udp.discoveryTimeoutMillis=1500
+udp.discoveryRetries=3
+multicast.group=239.255.42.99
+multicast.port=5002

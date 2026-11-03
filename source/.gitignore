@@ -1,0 +1,25 @@
+# Build
+target/
+*.class
+
+# Dữ liệu chạy, log, biên bản sinh ra khi chạy
+data/
+logs/
+*.log
+*.db
+*.db-journal
+settlement/output/
+
+# Cấu hình cá nhân (chỉ commit file *.example)
+config/*.properties
+!config/*.properties.example
+
+# IDE / hệ điều hành
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.DS_Store
+Thumbs.db

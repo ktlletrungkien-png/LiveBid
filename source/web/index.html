@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveBid</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>LiveBid</h1>
+        <span id="connection-status">Chưa kết nối</span>
+    </header>
+    <main>
+        <section id="login-view">
+            <!-- Đăng nhập / đăng ký qua REST /api/login, /api/register -->
+        </section>
+        <section id="auction-list-view" hidden>
+            <!-- Danh sách phiên qua REST /api/auctions -->
+        </section>
+        <section id="room-view" hidden>
+            <!-- Phòng đấu giá qua WebSocket ws://<server>:8080/ws -->
+        </section>
+    </main>
+    <script src="app.js"></script>
+</body>
+</html>
