@@ -50,15 +50,33 @@ Cấu hình: sao chép `source/config/server.properties.example` thành `source/
 | `/api/me/auctions` | GET | Phiên của tôi | Đăng nhập |
 | `/api/stats` | GET | Thống kê | Đăng nhập |
 
-## 📦 CẤU TRÚC
+## 📦 CẤU TRÚC VÀ PHÂN CÔNG
 
 ```
-server/
-├── README.md
-├── pom.xml
-└── src/main/java/com/livebid/server/
-    └── ServerMain.java
+server/src/main/java/com/livebid/server/
+├── ServerMain.java
+├── core/        # Hợp đồng chung + nghiệp vụ đấu giá            — Kiên
+│   ├── AuctionService.java   # interface: mọi đọc/ghi đấu giá đi qua đây (single-thread executor)
+│   ├── AuthService.java      # interface: đăng ký, đăng nhập, token  (Hoè cài đặt)
+│   ├── ClientChannel.java    # một kết nối TCP hoặc WebSocket
+│   ├── UserPrincipal.java    # người dùng đã đăng nhập trên kết nối
+│   └── ServiceException.java # lỗi nghiệp vụ mang ErrorCode
+├── model/       # Bản ghi DB: User, Auction, Bid, SettlementTask  — Kiên
+├── repo/        # Interface repository + TransactionManager       — Kiên định nghĩa
+│   └── memory/  # Bản trong bộ nhớ để test / phát triển song song
+├── tcp/         # TcpServer, framing, ClientSession               — Kiên
+├── db/          # Cài đặt SQLite của repo/*, migration            — Hoè
+├── auth/        # Cài đặt AuthService (PBKDF2, token)             — Hoè
+├── http/        # REST + WebSocket (Javalin)                      — Hoè
+├── udp/         # Discovery broadcast, multicast thông báo         — Quân
+└── settlement/  # SettlementClient (RMI) + retry                   — Quân
 ```
+
+Quy ước:
+
+- Chỉ `AuctionService` được đọc/ghi `AuctionRepository` và `BidRepository`. REST, WebSocket, TCP đều gọi `AuctionService`.
+- Đổi chữ ký interface trong `core/` hoặc `repo/` phải qua Pull Request và báo cả nhóm.
+- Mỗi người chỉ sửa package của mình; cần thay đổi ở package người khác thì nhờ người đó hoặc mở PR để họ duyệt.
 
 ## 📝 GHI CHÚ
 

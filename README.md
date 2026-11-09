@@ -109,6 +109,14 @@ Trình duyệt: mở `http://<IP server>:8080/`.
 mvn test
 ```
 
+Chạy 3 test tự động:
+
+| Test | Kiểm tra |
+|---|---|
+| Hai người cùng đặt giá | Hai client đặt cùng một mức giá đồng thời, chỉ một lượt được chấp nhận |
+| Framing TCP | Thông điệp bị chia nhỏ, nhiều thông điệp một lần đọc, JSON lỗi, thông điệp quá 64 KiB |
+| Bid sau giờ kết thúc | Bid tại hoặc sau `endsAt` bị từ chối, kể cả khi scheduler chưa chạy |
+
 ### 6. Chạy trên nhiều máy (Windows)
 
 Mở firewall cho mạng Private (PowerShell quyền admin):
@@ -143,7 +151,7 @@ Ví dụ thông điệp TCP/WebSocket:
 
 ## 📊 KẾT QUẢ THỰC NGHIỆM
 
-(Sẽ bổ sung: ảnh chụp giao diện, kết quả các ca kiểm thử, số liệu đo tải.)
+(Sẽ bổ sung: ảnh chụp giao diện, kết quả chạy `mvn test`.)
 
 ---
 
