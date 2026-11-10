@@ -71,6 +71,41 @@ $w.WriteLine('{"protocolVersion":1,"kind":"REQUEST","type":"PING","requestId":"1
 $c.Close()
 ```
 
+## ⚖️ NGHIỆP VỤ ĐẤU GIÁ (`core/`)
+
+**Xử lý đồng thời.** Mọi thao tác đọc/ghi đấu giá đi qua `BusinessExecutor`, một executor **một luồng** có
+hàng đợi giới hạn (đầy thì trả `SERVER_BUSY`). Hai người đặt cùng lúc là hai tác vụ xếp hàng; tác vụ sau
+luôn thấy giá mới, nên chỉ một người được nhận. Không cần khóa cho dữ liệu đấu giá.
+
+**Luồng đặt giá** (`AuctionServiceImpl.placeBid`):
+
+```
+đã đăng nhập, không phải ADMIN → requestId đã nhận? trả biên nhận cũ
+→ 1đ ≤ giá ≤ 1.000.000.000.000đ → lấy giờ server, tự mở/chốt phiên nếu đã tới hạn
+→ đang ở phòng? startsAt ≤ now < endsAt? giá ≥ mức tối thiểu?
+→ transaction: thêm bid + cập nhật giá/người dẫn đầu/version (+ gia hạn nếu trong 10 giây cuối)
+→ commit → lưu biên nhận → phát AUCTION_UPDATED (hoặc AUCTION_EXTENDED) cho cả phòng → trả biên nhận
+```
+
+| Quy tắc | Cách làm |
+|---|---|
+| Mức tối thiểu | Bid đầu: `≥ giá khởi điểm`; sau đó: `≥ giá hiện tại + bước giá` (không bắt buộc bội số) |
+| Thời gian | Server là nguồn giờ (`Clock`). Mỗi thao tác tự kiểm tra mốc, **không phụ thuộc scheduler** |
+| Anti-sniping | Bid khi còn ≤ 10 s thì `endsAt += 30 s`, tối đa 10 lần; chỉ phát **một** sự kiện `AUCTION_EXTENDED` |
+| Chống gửi trùng | Cache 10.000 biên nhận gần nhất theo (người dùng, `requestId`); mất khi restart (hạn chế đã biết) |
+| Chốt phiên | Một lần duy nhất; cùng transaction ghi `settlement_queue` để Settlement gửi bù được |
+| Sự kiện | Chỉ phát **sau commit**; mỗi sự kiện mang `AuctionView` đầy đủ, `version` tăng dần |
+
+`AuctionScheduler` cứ 500 ms đưa `processDueAuctions()` vào executor: mở phiên tới giờ, chốt phiên hết giờ,
+báo "sắp bắt đầu" (5 phút trước) qua `AuctionLifecycleListener`. Khi khởi động, gọi `processDueAuctions()`
+một lần trước khi mở cổng để chốt các phiên quá hạn lúc server tắt.
+
+**Cho Hoè:** `AuthService` cũng nên đưa thao tác DB vào cùng `BusinessExecutor`; riêng băm PBKDF2 chạy ở
+luồng riêng rồi mới đưa kết quả vào executor. REST/WebSocket chỉ gọi `AuctionService`.
+
+**Cho Quân:** cài `AuctionLifecycleListener` (gọi trên luồng executor, phải trả về ngay): `UdpAnnouncer` dùng
+`auctionStartingSoon`, `SettlementClient` dùng `auctionFinished` rồi đọc `settlement_queue` để retry.
+
 ## 🔗 API
 
 (Bổ sung khi triển khai — xem mục 10 kế hoạch.)
@@ -95,7 +130,13 @@ server/src/main/java/com/livebid/server/
 │   ├── AuthService.java      # interface: đăng ký, đăng nhập, token  (Hoè cài đặt)
 │   ├── ClientChannel.java    # một kết nối TCP hoặc WebSocket
 │   ├── UserPrincipal.java    # người dùng đã đăng nhập trên kết nối
-│   └── ServiceException.java # lỗi nghiệp vụ mang ErrorCode
+│   ├── ServiceException.java # lỗi nghiệp vụ mang ErrorCode
+│   ├── AuctionLifecycleListener.java # móc "sắp bắt đầu" / "đã chốt" cho UDP (Quân), Settlement (Quân)
+│   ├── BusinessExecutor.java # executor MỘT luồng: mọi thao tác nghiệp vụ + DB xếp hàng ở đây
+│   ├── AuctionServiceImpl.java # cài đặt AuctionService
+│   ├── RoomManager.java      # kênh nào đang ở phòng nào (TCP + WebSocket)
+│   ├── AuctionScheduler.java # nhịp 500 ms: đưa việc mở/chốt phiên vào executor
+│   └── AuctionSettings.java  # anti-sniping, thời gian báo trước, cỡ snapshot
 ├── model/       # Bản ghi DB: User, Auction, Bid, SettlementTask  — Kiên
 ├── repo/        # Interface repository + TransactionManager       — Kiên định nghĩa
 │   └── memory/  # Bản trong bộ nhớ để test / phát triển song song
