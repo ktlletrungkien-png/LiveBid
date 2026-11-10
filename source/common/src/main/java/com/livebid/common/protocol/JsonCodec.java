@@ -35,6 +35,10 @@ public final class JsonCodec {
     /**
      * JSON một dòng → thông điệp, kèm kiểm tra phong bì.
      *
+     * <p>Trường bắt buộc: {@code protocolVersion}, {@code kind}; {@code type} (trừ RESPONSE thất bại);
+     * {@code requestId} cho REQUEST và RESPONSE thành công. RESPONSE thất bại có thể thiếu {@code type},
+     * {@code requestId} (khi server không đọc được yêu cầu gốc) nhưng phải có {@code error}.
+     *
      * @throws ProtocolException {@code INVALID_MESSAGE} nếu JSON lỗi hoặc thiếu trường bắt buộc;
      *                           {@code UNSUPPORTED_VERSION} nếu sai phiên bản giao thức
      */
@@ -58,12 +62,18 @@ public final class JsonCodec {
         if (message.kind() == null) {
             throw new ProtocolException(ErrorCode.INVALID_MESSAGE, "Thiếu hoặc sai kind");
         }
-        if (message.type() == null || message.type().isBlank()) {
+        // RESPONSE lỗi cho một yêu cầu server không đọc được (JSON hỏng...) không có type/requestId.
+        boolean failedResponse = message.kind() == MessageKind.RESPONSE && !message.isSuccess();
+        if (!failedResponse && (message.type() == null || message.type().isBlank())) {
             throw new ProtocolException(ErrorCode.INVALID_MESSAGE, "Thiếu type");
         }
-        if (message.kind() != MessageKind.EVENT
-                && (message.requestId() == null || message.requestId().isBlank())) {
+        boolean needsRequestId = message.kind() == MessageKind.REQUEST
+                || (message.kind() == MessageKind.RESPONSE && !failedResponse);
+        if (needsRequestId && (message.requestId() == null || message.requestId().isBlank())) {
             throw new ProtocolException(ErrorCode.INVALID_MESSAGE, "Thiếu requestId");
+        }
+        if (failedResponse && message.error() == null) {
+            throw new ProtocolException(ErrorCode.INVALID_MESSAGE, "RESPONSE thất bại phải có error");
         }
         return message;
     }
