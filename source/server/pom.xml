@@ -44,6 +44,15 @@
                 <configuration>
                     <mainClass>com.livebid.server.ServerMain</mainClass>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>create-admin</id>
+                        <goals><goal>java</goal></goals>
+                        <configuration>
+                            <mainClass>com.livebid.server.auth.CreateAdminTool</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
