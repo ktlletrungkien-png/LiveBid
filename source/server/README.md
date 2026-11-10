@@ -106,6 +106,19 @@ luồng riêng rồi mới đưa kết quả vào executor. REST/WebSocket chỉ
 **Cho Quân:** cài `AuctionLifecycleListener` (gọi trên luồng executor, phải trả về ngay): `UdpAnnouncer` dùng
 `auctionStartingSoon`, `SettlementClient` dùng `auctionFinished` rồi đọc `settlement_queue` để retry.
 
+## 👤 TẠO TÀI KHOẢN ADMIN
+
+Tài khoản ADMIN không đăng ký được qua web; tạo bằng công cụ dòng lệnh (chạy từ thư mục `source/`):
+
+```powershell
+mvn -q install -DskipTests
+mvn -pl server exec:java@create-admin
+# hoặc chỉ định file CSDL:
+mvn -pl server exec:java@create-admin -Dexec.args="./data/auction.db"
+```
+
+Công cụ hỏi tên đăng nhập, tên hiển thị và mật khẩu (nhập hai lần). Trùng tên đăng nhập thì báo lỗi và thoát mã 1.
+
 ## 🔗 API
 
 (Bổ sung khi triển khai — xem mục 10 kế hoạch.)
