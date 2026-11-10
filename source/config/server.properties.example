@@ -11,6 +11,7 @@ database.path=./data/auction.db
 network.maxMessageBytes=65536
 network.heartbeatIntervalSeconds=15
 network.idleTimeoutSeconds=45
+network.maxConnections=100
 auction.antiSnipingWindowSeconds=10
 auction.antiSnipingExtensionSeconds=30
 auction.antiSnipingMaxExtensions=10

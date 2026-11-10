@@ -97,7 +97,7 @@ mvn install
 
 ```bash
 mvn -q -pl settlement exec:java     # 1. Dịch vụ Settlement (RMI)
-mvn -q -pl server exec:java         # 2. Auction Server
+mvn -pl server exec:java            # 2. Auction Server (không thêm -q, vì -q ẩn log của server)
 mvn -q -pl client exec:java         # 3. Desktop client (mở nhiều cửa sổ để thử)
 ```
 
