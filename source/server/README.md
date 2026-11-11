@@ -59,8 +59,18 @@ Xử lý lỗi trên một kết nối:
 | Không nhận byte nào trong `network.idleTimeoutSeconds` | Đóng kết nối (client nên gửi `PING` định kỳ) |
 | Client nhận quá chậm, hàng đợi gửi đầy | Đóng kết nối thay vì làm chậm executor |
 
-Lệnh đã chạy: `PING`. Các lệnh khác hiện trả `INTERNAL_ERROR` "Server chưa hỗ trợ lệnh ..." cho tới khi
-có handler.
+Lệnh đã chạy: `PING`, `REGISTER`, `LOGIN`, `LOGOUT`, `LIST_AUCTIONS`, `GET_AUCTION`, `JOIN_AUCTION`,
+`LEAVE_AUCTION`, `PLACE_BID`, `GET_BID_HISTORY`, `GET_MY_AUCTIONS`, `CREATE_AUCTION`, `UPDATE_AUCTION`
+(`AUTH` chỉ dùng trên WebSocket nên TCP trả `INTERNAL_ERROR` "chưa hỗ trợ").
+
+Quy tắc phiên đăng nhập trên TCP: mọi lệnh trừ `PING`/`REGISTER`/`LOGIN` cần đăng nhập (chưa thì `UNAUTHORIZED`);
+`CREATE_AUCTION`/`UPDATE_AUCTION` cần ADMIN (`FORBIDDEN`); người đặt giá luôn lấy từ phiên đăng nhập, không
+từ payload. Một kết nối là một tài khoản: đang đăng nhập mà `LOGIN`/`REGISTER` lại thì bị từ chối
+(`VALIDATION_ERROR`), phải `LOGOUT` trước. `LOGOUT` rời mọi phòng đang tham gia.
+
+Server khởi động theo thứ tự: mở SQLite (`database.path`, mặc định `./data/auction.db`) → dựng service →
+`processDueAuctions()` bắt kịp phiên đã đến giờ → scheduler → mở cổng TCP → UDP. Lỗi bind UDP chỉ cảnh báo,
+không làm server dừng.
 
 Thử nhanh bằng PowerShell khi server đang chạy:
 
