@@ -1,6 +1,8 @@
 package com.livebid.server;
 
 import com.livebid.common.Protocol;
+import com.livebid.server.auth.PasswordHasher;
+import com.livebid.server.core.AuctionSettings;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
@@ -112,5 +114,46 @@ public final class ServerConfig {
 
     public int maxConnections() {
         return getInt("network.maxConnections", 100);
+    }
+
+    // ------------------------------------------------------------------ khóa dùng chung khi khởi động
+
+    public Path databasePath() {
+        return Path.of(getString("database.path", "./data/auction.db"));
+    }
+
+    public int pbkdf2Iterations() {
+        return getInt("auth.pbkdf2Iterations", PasswordHasher.DEFAULT_ITERATIONS);
+    }
+
+    public int httpPort() {
+        return getInt("server.httpPort", Protocol.DEFAULT_HTTP_PORT);
+    }
+
+    public int udpDiscoveryPort() {
+        return getInt("server.udpDiscoveryPort", Protocol.DEFAULT_UDP_DISCOVERY_PORT);
+    }
+
+    public String multicastGroup() {
+        return getString("server.multicastGroup", Protocol.DEFAULT_MULTICAST_GROUP);
+    }
+
+    public int multicastPort() {
+        return getInt("server.multicastPort", Protocol.DEFAULT_MULTICAST_PORT);
+    }
+
+    public int multicastTtl() {
+        return getInt("server.multicastTtl", 1);
+    }
+
+    /** Khóa {@code auction.*}; thiếu khóa nào thì dùng mặc định của {@link AuctionSettings#defaults()}. */
+    public AuctionSettings auctionSettings() {
+        AuctionSettings d = AuctionSettings.defaults();
+        return new AuctionSettings(
+                getInt("auction.antiSnipingWindowSeconds", (int) (d.antiSnipingWindowMillis() / 1000)) * 1000L,
+                getInt("auction.antiSnipingExtensionSeconds", (int) (d.antiSnipingExtensionMillis() / 1000)) * 1000L,
+                getInt("auction.antiSnipingMaxExtensions", d.maxExtensions()),
+                getInt("auction.announceLeadSeconds", (int) (d.announceLeadMillis() / 1000)) * 1000L,
+                getInt("auction.snapshotBidCount", d.snapshotBidCount()));
     }
 }

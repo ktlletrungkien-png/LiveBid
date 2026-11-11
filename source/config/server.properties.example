@@ -17,3 +17,5 @@ auction.antiSnipingWindowSeconds=10
 auction.antiSnipingExtensionSeconds=30
 auction.antiSnipingMaxExtensions=10
 auth.pbkdf2Iterations=600000
+auction.announceLeadSeconds=300
+auction.snapshotBidCount=20

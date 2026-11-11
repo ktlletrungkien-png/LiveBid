@@ -12,3 +12,10 @@
 # Hệ điều hành
 .DS_Store
 Thumbs.db
+
+# Cơ sở dữ liệu SQLite tạo khi chạy server
+/source/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
