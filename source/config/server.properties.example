@@ -20,3 +20,4 @@ auction.antiSnipingMaxExtensions=10
 auth.pbkdf2Iterations=600000
 auction.announceLeadSeconds=300
 auction.snapshotBidCount=20
+http.webRoot=web
