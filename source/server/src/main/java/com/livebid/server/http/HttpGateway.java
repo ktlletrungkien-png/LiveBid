@@ -4,6 +4,7 @@ import com.google.gson.JsonParseException;
 import com.livebid.common.dto.AuctionDraft;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.LoginResult;
+import com.livebid.common.Protocol;
 import com.livebid.common.dto.MyAuctionFilter;
 import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.RegisterPayload;
@@ -12,13 +13,17 @@ import com.livebid.common.protocol.JsonCodec;
 import com.livebid.common.rmi.SettlementSummaryDto;
 import com.livebid.server.core.AuctionService;
 import com.livebid.server.core.AuthService;
+import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.ServiceException;
 import com.livebid.server.core.UserPrincipal;
+import com.livebid.server.tcp.MessageRouter;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.http.staticfiles.Location;
+import io.javalin.websocket.WsConfig;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -26,7 +31,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +63,8 @@ public final class HttpGateway implements AutoCloseable {
     private static final int DEFAULT_PAGE = 1;
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int DEFAULT_BID_LIMIT = 20;
+    /** Trình duyệt gửi PING mỗi 15 giây, nên im lặng quá 45 giây nghĩa là đã mất kết nối. */
+    private static final Duration WS_IDLE_TIMEOUT = Duration.ofSeconds(45);
 
     /**
      * @param port    cổng HTTP; 0 = cổng ngẫu nhiên (dùng cho test)
@@ -72,6 +81,10 @@ public final class HttpGateway implements AutoCloseable {
     private final AuthService auth;
     private final AuctionService auctions;
     private final Supplier<Optional<SettlementSummaryDto>> stats;
+    /** Kênh WebSocket đang mở, khóa theo mã session của Jetty. */
+    private final Map<String, WsChannel> channels = new ConcurrentHashMap<>();
+    private MessageRouter router;
+    private Consumer<ClientChannel> onDisconnect;
     private Javalin app;
 
     /**
@@ -86,6 +99,25 @@ public final class HttpGateway implements AutoCloseable {
         this.stats = Objects.requireNonNull(stats);
     }
 
+    /**
+     * Bật endpoint WebSocket {@code /ws}. <b>Phải gọi trước {@link #start()}</b>; không gọi thì gateway chỉ
+     * phục vụ REST và file tĩnh.
+     *
+     * <p>WebSocket dùng lại đúng {@code MessageRouter} của TCP (cùng định dạng thông điệp, cùng handler,
+     * cùng {@code AuctionService}), nên router phải là bản đã đăng ký đủ handler (gồm {@code AUTH}).
+     *
+     * @param router       router dùng chung với TCP
+     * @param onDisconnect gọi khi một kết nối WebSocket đóng, để rời mọi phòng đấu giá
+     *                     (thường là {@code auctions::onDisconnect})
+     */
+    public void enableWebSocket(MessageRouter router, Consumer<ClientChannel> onDisconnect) {
+        if (app != null) {
+            throw new IllegalStateException("Phải bật WebSocket trước khi start()");
+        }
+        this.router = Objects.requireNonNull(router);
+        this.onDisconnect = Objects.requireNonNull(onDisconnect);
+    }
+
     /** Mở cổng và bắt đầu phục vụ. */
     public void start() {
         if (app != null) {
@@ -98,6 +130,11 @@ public final class HttpGateway implements AutoCloseable {
         }
         app = Javalin.create(config -> {
             config.showJavalinBanner = false;
+            // Giới hạn như TCP: thông điệp tối đa 64 KiB, kết nối im lặng quá 45 giây thì đóng.
+            config.jetty.modifyWebSocketServletFactory(factory -> {
+                factory.setMaxTextMessageSize(Protocol.MAX_MESSAGE_BYTES);
+                factory.setIdleTimeout(WS_IDLE_TIMEOUT);
+            });
             if (serveStatic) {
                 config.staticFiles.add(webRoot.toAbsolutePath().toString(), Location.EXTERNAL);
             }
@@ -117,6 +154,7 @@ public final class HttpGateway implements AutoCloseable {
 
     @Override
     public void close() {
+        channels.values().forEach(channel -> channel.close("server dừng"));
         if (app != null) {
             app.stop();
             app = null;
@@ -140,6 +178,12 @@ public final class HttpGateway implements AutoCloseable {
         app.get("/api/auctions/{id}/bids", this::bidHistory);
         app.get("/api/stats", this::stats);
 
+        if (router != null) {
+            app.ws("/ws", this::configureWebSocket);
+        } else {
+            log.info("WebSocket /ws chưa được bật (chưa gọi enableWebSocket)");
+        }
+
         // Lỗi đồng bộ (JSON hỏng, tham số sai, chưa đăng nhập...) đều đổi thành JSON lỗi thống nhất.
         app.exception(Exception.class, (e, ctx) -> writeError(ctx, e));
     }
@@ -158,6 +202,47 @@ public final class HttpGateway implements AutoCloseable {
         }
         ctx.attribute(ATTR_PRINCIPAL, principal.get());
         ctx.attribute(ATTR_TOKEN, token);
+    }
+
+    // ---------------------------------------------------------------- WebSocket
+
+    /**
+     * Mỗi kết nối WebSocket có một {@link WsChannel}. Thông điệp nhận được chuyển nguyên chuỗi JSON cho
+     * {@link MessageRouter}; router chạy trên luồng của Jetty nên không chặn, kết quả được gửi về qua
+     * hàng đợi gửi của kênh.
+     */
+    private void configureWebSocket(WsConfig ws) {
+        ws.onConnect(ctx -> {
+            WsChannel channel = new WsChannel(ctx, this::channelClosed);
+            channels.put(channel.sessionId(), channel);
+            channel.start();
+            log.info("Kết nối WebSocket mới {} từ {}", channel.id(), channel.remoteAddress());
+        });
+        ws.onMessage(ctx -> {
+            WsChannel channel = channels.get(ctx.sessionId());
+            if (channel != null) {
+                router.dispatch(channel, ctx.message());
+            }
+        });
+        ws.onClose(ctx -> {
+            WsChannel channel = channels.get(ctx.sessionId());
+            if (channel != null) {
+                channel.close("client đóng kết nối");
+            }
+        });
+        ws.onError(ctx -> {
+            WsChannel channel = channels.get(ctx.sessionId());
+            if (channel != null) {
+                String detail = ctx.error() == null ? "không rõ" : ctx.error().toString();
+                channel.close("lỗi kết nối: " + detail);
+            }
+        });
+    }
+
+    /** Gọi đúng một lần khi một kênh đóng: bỏ khỏi danh sách rồi rời mọi phòng đấu giá. */
+    private void channelClosed(WsChannel channel) {
+        channels.remove(channel.sessionId());
+        onDisconnect.accept(channel);
     }
 
     // ---------------------------------------------------------------- tài khoản
