@@ -130,6 +130,23 @@ public final class ServerConfig {
         return getInt("server.httpPort", Protocol.DEFAULT_HTTP_PORT);
     }
 
+    /** Thư mục trang web tĩnh do {@code HttpGateway} phục vụ tại {@code /}. */
+    public Path webRoot() {
+        return Path.of(getString("http.webRoot", "web"));
+    }
+
+    public String settlementRmiHost() {
+        return getString("settlement.rmiHost", "127.0.0.1");
+    }
+
+    public int settlementRmiPort() {
+        return getInt("settlement.rmiPort", Protocol.DEFAULT_RMI_PORT);
+    }
+
+    public long settlementRetryIntervalMillis() {
+        return getInt("settlement.retryIntervalSeconds", 10) * 1000L;
+    }
+
     public int udpDiscoveryPort() {
         return getInt("server.udpDiscoveryPort", Protocol.DEFAULT_UDP_DISCOVERY_PORT);
     }
