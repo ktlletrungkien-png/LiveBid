@@ -6,6 +6,7 @@ import com.livebid.common.protocol.Message;
 import com.livebid.common.protocol.MessageKind;
 import com.livebid.common.protocol.MessageType;
 import com.livebid.common.protocol.ProtocolException;
+import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.ServiceException;
 import java.time.Clock;
 import java.util.EnumMap;
@@ -18,7 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Nhận một dòng JSON từ {@link ClientSession}, kiểm tra phong bì rồi chuyển tới handler của lệnh đó.
+ * Nhận một khung JSON từ {@link ClientChannel} (TCP hoặc WebSocket), kiểm tra phong bì rồi chuyển tới handler của lệnh đó.
  * Mỗi REQUEST nhận đúng một RESPONSE cùng {@code requestId}, kể cả khi lỗi.
  *
  * <p>Router chạy trên luồng đọc của kết nối nên <b>không được chặn</b>: handler trả về
@@ -40,7 +41,7 @@ public final class MessageRouter {
     /** Xử lý một loại lệnh. Kết quả của future là payload của RESPONSE thành công (có thể null). */
     @FunctionalInterface
     public interface Handler {
-        CompletableFuture<?> handle(ClientSession session, Message request) throws ProtocolException;
+        CompletableFuture<?> handle(ClientChannel session, Message request) throws ProtocolException;
     }
 
     private final Map<MessageType, Handler> handlers = new EnumMap<>(MessageType.class);
@@ -61,7 +62,7 @@ public final class MessageRouter {
     }
 
     /** Xử lý một khung đã tách bởi {@link LineFrameDecoder}. Không ném lỗi. */
-    public void dispatch(ClientSession session, String frame) {
+    public void dispatch(ClientChannel session, String frame) {
         Message request;
         try {
             request = JsonCodec.decode(frame);
@@ -96,11 +97,11 @@ public final class MessageRouter {
                 : toFailure(session, request, error)));
     }
 
-    private static void reply(ClientSession session, Message request, ErrorCode code, String text) {
+    private static void reply(ClientChannel session, Message request, ErrorCode code, String text) {
         session.send(Message.failure(request, code, text, null));
     }
 
-    private static Message toFailure(ClientSession session, Message request, Throwable error) {
+    private static Message toFailure(ClientChannel session, Message request, Throwable error) {
         Throwable cause = unwrap(error);
         if (cause instanceof ServiceException e) {
             return Message.failure(request, e.code(), e.getMessage(), e.details());

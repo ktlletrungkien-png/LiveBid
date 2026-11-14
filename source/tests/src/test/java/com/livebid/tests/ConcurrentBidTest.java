@@ -199,5 +199,17 @@ class ConcurrentBidTest {
         public boolean isOpen() {
             return true;
         }
+
+        private volatile UserPrincipal principal;
+
+        @Override
+        public UserPrincipal principal() {
+            return principal;
+        }
+
+        @Override
+        public void setPrincipal(UserPrincipal principal) {
+            this.principal = principal;
+        }
     }
 }

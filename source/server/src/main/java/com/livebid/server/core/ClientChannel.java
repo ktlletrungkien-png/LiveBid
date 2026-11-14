@@ -34,6 +34,15 @@ public interface ClientChannel {
 
     boolean isOpen();
 
+    /**
+     * Người dùng đã đăng nhập trên kết nối này; {@code null} nếu chưa. Một kết nối đại diện cho đúng một tài
+     * khoản, đóng kết nối là mất đăng nhập. Đặt ở interface để cùng một router xử lý được cả TCP và WebSocket.
+     */
+    UserPrincipal principal();
+
+    /** Gán sau khi đăng nhập thành công (LOGIN/REGISTER/AUTH); {@code null} khi LOGOUT. */
+    void setPrincipal(UserPrincipal principal);
+
     enum Transport {
         TCP,
         WEBSOCKET
