@@ -8,6 +8,7 @@ server.multicastPort=5002
 server.multicastTtl=1
 settlement.rmiHost=127.0.0.1
 settlement.rmiPort=1099
+settlement.retryIntervalSeconds=10
 database.path=./data/auction.db
 network.maxMessageBytes=65536
 network.heartbeatIntervalSeconds=15
