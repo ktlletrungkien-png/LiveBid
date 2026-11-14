@@ -47,8 +47,6 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Settlement (RMI) là tiến trình riêng: server vẫn chạy khi Settlement tắt, kết quả phiên nằm trong
  * {@code settlement_queue} và được gửi bù khi Settlement trở lại; {@code /api/stats} khi đó trả 503.
- *
- * <p>Còn thiếu: WebSocket {@code /ws} (mốc M4 của Hoè).
  */
 public final class ServerMain {
 
@@ -115,6 +113,8 @@ public final class ServerMain {
         // --- HTTP: REST /api + trang web tĩnh. Dùng chung auth và auctions với TCP.
         HttpGateway http = new HttpGateway(new HttpGateway.Settings(config.httpPort(), config.webRoot()),
                 auth, auctions, settlementClient::fetchSummary);
+        // WebSocket /ws dùng chung router với TCP; đóng kết nối thì rời phòng như TCP. Phải gọi trước start().
+        http.enableWebSocket(router, auctions::onDisconnect);
         http.start();
 
         // --- UDP discovery
