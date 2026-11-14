@@ -21,6 +21,7 @@ import com.livebid.common.protocol.Message;
 import com.livebid.common.protocol.MessageType;
 import com.livebid.common.protocol.ProtocolException;
 import com.livebid.server.core.AuctionService;
+import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.UserPrincipal;
 import java.util.List;
 import java.util.Objects;
@@ -57,7 +58,7 @@ public final class AuctionCommands {
 
     // ---------------------------------------------------------------- tra cứu
 
-    private CompletableFuture<PageResult<AuctionView>> listAuctions(ClientSession session, Message request)
+    private CompletableFuture<PageResult<AuctionView>> listAuctions(ClientChannel session, Message request)
             throws ProtocolException {
         requireLogin(session);
         ListAuctionsPayload p = request.payloadAs(ListAuctionsPayload.class);
@@ -67,20 +68,20 @@ public final class AuctionCommands {
         return auctions.listAuctions(p.status(), p.page(), p.pageSize());
     }
 
-    private CompletableFuture<AuctionView> getAuction(ClientSession session, Message request)
+    private CompletableFuture<AuctionView> getAuction(ClientChannel session, Message request)
             throws ProtocolException {
         requireLogin(session);
         return auctions.getAuction(payload(request, AuctionIdPayload.class).auctionId());
     }
 
-    private CompletableFuture<List<BidView>> getBidHistory(ClientSession session, Message request)
+    private CompletableFuture<List<BidView>> getBidHistory(ClientChannel session, Message request)
             throws ProtocolException {
         requireLogin(session);
         BidHistoryPayload p = payload(request, BidHistoryPayload.class);
         return auctions.getBidHistory(p.auctionId(), p.beforeBidId(), p.limit());
     }
 
-    private CompletableFuture<List<AuctionView>> getMyAuctions(ClientSession session, Message request)
+    private CompletableFuture<List<AuctionView>> getMyAuctions(ClientChannel session, Message request)
             throws ProtocolException {
         MyAuctionsPayload p = payload(request, MyAuctionsPayload.class);
         return auctions.getMyAuctions(requireLogin(session), p.filter());
@@ -89,13 +90,13 @@ public final class AuctionCommands {
     // ---------------------------------------------------------------- phòng đấu giá
 
     /** Trả snapshot đầy đủ; từ đây kết nối nhận sự kiện AUCTION_* của phiên. */
-    private CompletableFuture<RoomSnapshot> joinAuction(ClientSession session, Message request)
+    private CompletableFuture<RoomSnapshot> joinAuction(ClientChannel session, Message request)
             throws ProtocolException {
         return auctions.joinAuction(requireLogin(session), session,
                 payload(request, AuctionIdPayload.class).auctionId());
     }
 
-    private CompletableFuture<Void> leaveAuction(ClientSession session, Message request)
+    private CompletableFuture<Void> leaveAuction(ClientChannel session, Message request)
             throws ProtocolException {
         requireLogin(session);
         return auctions.leaveAuction(session, payload(request, AuctionIdPayload.class).auctionId());
@@ -108,7 +109,7 @@ public final class AuctionCommands {
      * cho service: client gửi lại cùng requestId (do mất phản hồi) thì nhận biên nhận cũ, không tạo bid mới.
      * ADMIN bị service từ chối {@code FORBIDDEN}; chưa JOIN thì {@code NOT_IN_ROOM}.
      */
-    private CompletableFuture<BidReceipt> placeBid(ClientSession session, Message request)
+    private CompletableFuture<BidReceipt> placeBid(ClientChannel session, Message request)
             throws ProtocolException {
         UserPrincipal user = requireLogin(session);
         PlaceBidPayload p = payload(request, PlaceBidPayload.class);
@@ -117,13 +118,13 @@ public final class AuctionCommands {
 
     // ---------------------------------------------------------------- quản trị (ADMIN)
 
-    private CompletableFuture<AuctionView> createAuction(ClientSession session, Message request)
+    private CompletableFuture<AuctionView> createAuction(ClientChannel session, Message request)
             throws ProtocolException {
         UserPrincipal admin = requireAdmin(session);
         return auctions.createAuction(admin, payload(request, AuctionDraft.class));
     }
 
-    private CompletableFuture<AuctionView> updateAuction(ClientSession session, Message request)
+    private CompletableFuture<AuctionView> updateAuction(ClientChannel session, Message request)
             throws ProtocolException {
         UserPrincipal admin = requireAdmin(session);
         UpdateAuctionPayload p = payload(request, UpdateAuctionPayload.class);

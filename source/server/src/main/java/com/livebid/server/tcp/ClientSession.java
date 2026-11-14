@@ -135,12 +135,12 @@ public final class ClientSession implements ClientChannel {
 
     // ------------------------------------------------------------------ đăng nhập
 
-    /** Người dùng đã đăng nhập trên kết nối này; null nếu chưa. */
+    @Override
     public UserPrincipal principal() {
         return principal;
     }
 
-    /** Gán sau LOGIN/REGISTER thành công; {@code null} khi LOGOUT. */
+    @Override
     public void setPrincipal(UserPrincipal principal) {
         this.principal = principal;
     }
