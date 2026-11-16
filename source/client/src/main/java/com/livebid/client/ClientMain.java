@@ -1,17 +1,45 @@
 package com.livebid.client;
 
-import com.livebid.common.Protocol;
+import com.livebid.client.ui.MainFrame;
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 
 /**
- * Điểm khởi động Desktop client (Swing).
+ * Điểm khởi động desktop client (Swing).
  *
- * TODO: màn hình Kết nối (tìm server bằng UDP / nhập IP), Đăng nhập, Danh sách phiên,
- * Phòng đấu giá, Lịch sử cá nhân, Quản trị. Mọi tác vụ mạng chạy ngoài luồng giao diện.
+ * <p>Đọc {@code config/client.properties} rồi mở {@link MainFrame}. Mọi việc dựng giao diện chạy trên
+ * Event Dispatch Thread; việc mạng nằm trong {@code ServerConnection} và {@code UdpDiscoveryClient}.
+ *
+ * <p>Chạy: {@code cd source && mvn -q -pl client exec:java}
  */
 public final class ClientMain {
 
+    private ClientMain() {
+    }
+
     public static void main(String[] args) {
-        System.out.println("LiveBid desktop client - protocol v" + Protocol.PROTOCOL_VERSION
-                + " (not implemented yet)");
+        SwingUtilities.invokeLater(ClientMain::start);
+    }
+
+    private static void start() {
+        useSystemLookAndFeel();
+        ClientConfig config;
+        try {
+            config = ClientConfig.load();
+        } catch (RuntimeException e) {
+            JOptionPane.showMessageDialog(null, e.getMessage(),
+                    "LiveBid - Lỗi cấu hình", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        new MainFrame(config).setVisible(true);
+    }
+
+    private static void useSystemLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException e) {
+            // Giữ look-and-feel mặc định của Java; giao diện vẫn dùng được.
+        }
     }
 }
