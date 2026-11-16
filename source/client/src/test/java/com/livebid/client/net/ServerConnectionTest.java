@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.reflect.TypeToken;
+import com.livebid.common.dto.BidView;
 import com.livebid.common.dto.LoginResult;
+import com.livebid.common.payload.BidHistoryPayload;
 import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.JsonCodec;
@@ -17,10 +20,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -180,6 +185,29 @@ class ServerConnectionTest {
         RemoteErrorException error = assertInstanceOf(RemoteErrorException.class, failure.getCause());
         assertEquals(ErrorCode.INVALID_CREDENTIALS, error.error().code());
         assertEquals("Sai tên đăng nhập hoặc mật khẩu", error.getMessage());
+    }
+
+    @Test
+    void callVoiTypeDocDuocDanhSachCoGeneric() throws Exception {
+        server = new FakeServer();
+        connection = new ServerConnection();
+        connection.connect("127.0.0.1", server.port());
+
+        Type listOfBids = new TypeToken<List<BidView>>() { }.getType();
+        CompletableFuture<List<BidView>> future = connection.call(MessageType.GET_BID_HISTORY,
+                new BidHistoryPayload(7, null, 20), listOfBids);
+        Message request = server.readRequest();
+        assertEquals(MessageType.GET_BID_HISTORY, request.typeEnum());
+        server.send(Message.success(request, List.of(
+                new BidView(11, 7, "An", 220_000, 1_700_000_000_000L),
+                new BidView(12, 7, "Bình", 240_000, 1_700_000_001_000L))));
+
+        List<BidView> bids = future.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals(2, bids.size(), "Phải đọc được List<BidView> nhờ TypeToken");
+        assertEquals(11, bids.get(0).bidId());
+        assertEquals("An", bids.get(0).bidderDisplayName());
+        assertEquals(220_000, bids.get(0).amount());
+        assertEquals("Bình", bids.get(1).bidderDisplayName());
     }
 
     private static String which(Message message) {
