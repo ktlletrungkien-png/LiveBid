@@ -61,7 +61,7 @@ public final class MessageRouter {
         handlers.put(type, Objects.requireNonNull(handler));
     }
 
-    /** Xử lý một khung đã tách bởi {@link LineFrameDecoder}. Không ném lỗi. */
+    /** Xử lý một khung đã tách bởi {@code LineFrameDecoder}. Không ném lỗi. */
     public void dispatch(ClientChannel session, String frame) {
         Message request;
         try {

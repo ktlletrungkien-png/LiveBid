@@ -1,4 +1,4 @@
-package com.livebid.server.tcp;
+package com.livebid.common.transport;
 
 import java.io.IOException;
 

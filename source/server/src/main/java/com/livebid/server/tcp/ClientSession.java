@@ -3,6 +3,8 @@ package com.livebid.server.tcp;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.JsonCodec;
 import com.livebid.common.protocol.Message;
+import com.livebid.common.transport.FrameTooLargeException;
+import com.livebid.common.transport.LineFrameDecoder;
 import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.UserPrincipal;
 import java.io.BufferedOutputStream;

@@ -47,7 +47,7 @@ Server tìm file theo thứ tự: tham số dòng lệnh → `-Dlivebid.config=.
 |---|---|
 | `TcpServer` | Mở cổng, nhận kết nối, giới hạn `network.maxConnections` (vượt thì trả `SERVER_BUSY` rồi đóng) |
 | `ClientSession` | Một kết nối: luồng đọc riêng; hàng đợi gửi giới hạn 256 thông điệp + **một** luồng ghi; giữ trạng thái đăng nhập |
-| `LineFrameDecoder` | Tách khung JSON một dòng kết thúc `\n`, tối đa 64 KiB, kiểm tra ngay khi đọc từng byte |
+| *(đã chuyển)* | `LineFrameDecoder` + `FrameTooLargeException` nay ở `common.transport` để client dùng chung |
 | `MessageRouter` | Kiểm tra phong bì, chuyển lệnh tới handler, đổi lỗi thành RESPONSE `success=false` |
 
 Xử lý lỗi trên một kết nối:

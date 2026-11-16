@@ -288,7 +288,7 @@ source/
 │   ├── repo/                # Kiên: UserRepository, AuctionRepository, BidRepository,
 │   │   │                    # SettlementQueueRepository, TransactionManager, DataAccessException
 │   │   └── memory/          # bản lưu trong bộ nhớ (InMemory*) để test
-│   ├── tcp/                 # Kiên: TcpServer, ClientSession, LineFrameDecoder, MessageRouter
+│   ├── tcp/                 # Kiên: TcpServer, ClientSession, MessageRouter
 │   ├── db/  auth/  http/    # Hoè (hiện chỉ có package-info.java)
 │   └── udp/  settlement/    # Quân (hiện chỉ có package-info.java)
 ├── client/                  # Quân — desktop client Swing (hiện chỉ có ClientMain rỗng)
@@ -314,7 +314,7 @@ source/
 | `server.repo.*` | Interface truy cập dữ liệu (đọc javadoc từng hàm: thứ tự sắp xếp, hành vi khi trùng…). `TransactionManager.inTransaction(Work<T>)` |
 | `server.repo.memory.*` | Bản trong bộ nhớ: **hành vi chuẩn** mà bản SQLite phải giống hệt |
 | `server.tcp.MessageRouter` | Nhận dòng JSON, kiểm tra phong bì, gọi handler theo `MessageType`, đổi lỗi thành RESPONSE. `register(MessageType, Handler)` |
-| `server.tcp.LineFrameDecoder` | Tách luồng byte thành dòng JSON, giới hạn 64 KiB, ném `FrameTooLargeException` |
+| `common.transport.LineFrameDecoder` | Tách luồng byte thành dòng JSON, giới hạn 64 KiB, ném `FrameTooLargeException` |
 | `server.ServerConfig` | `ServerConfig.load(args)`, `getString(key, def)`, `getInt(key, def)`, `ServerConfig.defaults()` cho test |
 
 ### 4.2. Quy tắc luồng (threading) — quan trọng nhất
@@ -332,7 +332,7 @@ source/
 | Mã | Việc của Kiên | Ai cần | Trạng thái lúc giao |
 |---|---|---|---|
 | K1 | Đổi `MessageRouter` để làm việc với `ClientChannel` (không chỉ `ClientSession`), chuyển trạng thái đăng nhập (`principal()`/`setPrincipal()`) vào `ClientChannel`, thêm handler `AUTH` cho WebSocket | Hoè (WebSocket) | Chưa làm |
-| K2 | Chuyển `LineFrameDecoder` + `FrameTooLargeException` sang module `common` để client dùng chung | Quân (client TCP) | Chưa làm |
+| K2 | Chuyển `LineFrameDecoder` + `FrameTooLargeException` sang module `common` để client dùng chung | Quân (client TCP) | Đã xong |
 | K3 | `ServerMain` gắn đủ: `AuctionServiceImpl` + scheduler + handler các lệnh (`LOGIN`, `REGISTER`, `JOIN_AUCTION`, `PLACE_BID`…); thay `InMemory*` bằng SQLite khi Hoè xong; gắn `AuthServiceImpl`, `HttpGateway`, UDP, `SettlementClient` khi từng phần được merge; gộp nhiều `AuctionLifecycleListener` | Cả hai | Chưa làm (hiện chỉ có PING) |
 
 Trước khi làm một mốc có ghi "Chờ K1/K2/K3", agent kiểm tra `main` mới nhất xem Kiên đã làm chưa (đọc code,

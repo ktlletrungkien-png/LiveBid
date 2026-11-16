@@ -20,6 +20,7 @@ common/src/main/java/com/livebid/common/
 ├── payload/                 # Dữ liệu của từng REQUEST (LoginPayload, PlaceBidPayload, ...)
 ├── dto/                     # Dữ liệu server trả về (AuctionView, BidView, BidReceipt, RoomSnapshot, ...)
 ├── udp/                     # Gói UDP: DiscoveryReply, AuctionAnnouncement
+├── transport/               # Đóng khung TCP dùng chung server + client: LineFrameDecoder, FrameTooLargeException
 └── rmi/                     # Interface RMI SettlementService + AuctionResultDto, SettlementSummaryDto
 ```
 
