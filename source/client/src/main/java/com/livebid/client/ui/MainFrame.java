@@ -138,11 +138,15 @@ public final class MainFrame extends JFrame {
             case DISCONNECTED -> {
                 setStatus("Chưa kết nối tới server");
                 userLabel.setText("");
-                if (loginPanel != null || homePanel != null) {
+                if (loginPanel != null) {
+                    cardPanel.remove(loginPanel);
                     loginPanel = null;
-                    homePanel = null;
-                    showConnect();
                 }
+                if (homePanel != null) {
+                    cardPanel.remove(homePanel);
+                    homePanel = null;
+                }
+                showConnect();
             }
         }
     }
