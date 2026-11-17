@@ -7,21 +7,15 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header>
-        <h1>LiveBid</h1>
-        <span id="connection-status">Chưa kết nối</span>
+    <header class="site-header">
+        <h1><a href="#/auctions">LiveBid</a></h1>
+        <nav id="nav" aria-label="Điều hướng chính"></nav>
+        <div id="user-box"></div>
     </header>
-    <main>
-        <section id="login-view">
-            <!-- Đăng nhập / đăng ký qua REST /api/login, /api/register -->
-        </section>
-        <section id="auction-list-view" hidden>
-            <!-- Danh sách phiên qua REST /api/auctions -->
-        </section>
-        <section id="room-view" hidden>
-            <!-- Phòng đấu giá qua WebSocket ws://<server>:8080/ws -->
-        </section>
+    <main id="app">
+        <noscript>Trang này cần bật JavaScript.</noscript>
     </main>
-    <script src="app.js"></script>
+    <div id="toasts" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -131,16 +131,25 @@ Công cụ hỏi tên đăng nhập, tên hiển thị và mật khẩu (nhập 
 
 ## 🔗 API
 
-(Bổ sung khi triển khai — xem mục 10 kế hoạch.)
+REST và WebSocket do `http/HttpGateway` (Javalin, cổng 8080) phục vụ, cùng với trang web tĩnh trong
+`source/web` (khóa cấu hình `http.webRoot`). Chi tiết body và mã lỗi: README gốc, mục "🔗 GIAO TIẾP".
 
-| Endpoint | Method | Mô tả | Quyền |
-|---|---|---|---|
-| `/api/register`, `/api/login` | POST | Đăng ký, đăng nhập | Công khai |
-| `/api/auctions` | GET / POST | Danh sách / tạo phiên | Đăng nhập / ADMIN |
-| `/api/auctions/{id}` | GET / PUT | Chi tiết / sửa phiên | Đăng nhập / ADMIN |
-| `/api/auctions/{id}/bids` | GET | Lịch sử bid | Đăng nhập |
-| `/api/me/auctions` | GET | Phiên của tôi | Đăng nhập |
-| `/api/stats` | GET | Thống kê | Đăng nhập |
+| Endpoint | Method | Mô tả | Quyền | Thành công |
+|---|---|---|---|---|
+| `/api/register` | POST | Đăng ký (luôn tạo USER) | Công khai | 201 `{user, token}` |
+| `/api/login` | POST | Đăng nhập | Công khai | 200 `{user, token}` |
+| `/api/logout` | POST | Thu hồi token | Đăng nhập | 204 |
+| `/api/me` | GET | Tài khoản đang đăng nhập | Đăng nhập | 200 |
+| `/api/auctions` | GET | Danh sách, `?status&page&pageSize` | Đăng nhập | 200 |
+| `/api/auctions` | POST | Tạo phiên | ADMIN | 201 |
+| `/api/auctions/{id}` | GET | Chi tiết phiên | Đăng nhập | 200 |
+| `/api/auctions/{id}` | PUT | Sửa phiên chưa bắt đầu, `{expectedVersion, draft}` | ADMIN | 200 |
+| `/api/auctions/{id}/bids` | GET | Lịch sử bid, `?before&limit` | Đăng nhập | 200 |
+| `/api/me/auctions` | GET | Phiên của tôi, `?filter=participated\|won` | Đăng nhập | 200 |
+| `/api/stats` | GET | Thống kê Settlement (503 khi Settlement chưa chạy) | Đăng nhập | 200 |
+| `/ws` | WebSocket | `AUTH` bằng token rồi dùng bộ lệnh như TCP | Token | — |
+
+Lỗi trả JSON `{"error":{"code","message","details"}}` với mã HTTP lấy từ `ErrorCode.httpStatus()`.
 
 ## 📦 CẤU TRÚC VÀ PHÂN CÔNG
 
