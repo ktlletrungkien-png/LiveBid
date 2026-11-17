@@ -145,7 +145,52 @@ Ví dụ thông điệp TCP/WebSocket:
 {"protocolVersion":1,"kind":"REQUEST","type":"PLACE_BID","requestId":"2e8d7fd0-...","payload":{"auctionId":1,"amount":280000}}
 ```
 
-(Danh sách đầy đủ các yêu cầu, sự kiện, mã lỗi và endpoint REST sẽ được bổ sung khi triển khai.)
+(Danh sách đầy đủ các yêu cầu TCP, sự kiện và mã lỗi sẽ được bổ sung khi triển khai.)
+
+### REST API (`http://<server>:8080/api`)
+
+Thành công: body là DTO JSON trực tiếp. Lỗi: mã HTTP theo `ErrorCode`, body
+`{"error":{"code":"BID_TOO_LOW","message":"...","details":{...}}}`. Mọi endpoint trừ `register` và `login` cần
+header `Authorization: Bearer <token>` (thiếu hoặc sai → `401 UNAUTHORIZED`).
+
+| Phương thức | Đường dẫn | Quyền | Body / tham số | Trả về |
+|---|---|---|---|---|
+| POST | `/api/register` | Công khai | `{username, password, displayName}` | `201` `{user, token}` · `400` · `409 USERNAME_TAKEN` |
+| POST | `/api/login` | Công khai | `{username, password}` | `200` `{user, token}` · `401 INVALID_CREDENTIALS` |
+| POST | `/api/logout` | Đăng nhập | — | `204` (thu hồi token) |
+| GET | `/api/me` | Đăng nhập | — | `200` `UserView` |
+| GET | `/api/auctions` | Đăng nhập | `?status=ACTIVE&page=1&pageSize=20` (`status` bỏ trống = tất cả) | `200` `{items, page, pageSize, hasMore}` |
+| GET | `/api/auctions/{id}` | Đăng nhập | — | `200` `AuctionView` · `404 AUCTION_NOT_FOUND` |
+| GET | `/api/auctions/{id}/bids` | Đăng nhập | `?before=<bidId>&limit=20` | `200` danh sách `BidView`, mới nhất trước |
+| GET | `/api/me/auctions` | Đăng nhập | `?filter=participated` hoặc `won` | `200` danh sách `AuctionView` |
+| GET | `/api/stats` | Đăng nhập | — | `200` thống kê Settlement · `503` khi Settlement chưa chạy |
+| POST | `/api/auctions` | ADMIN | `{title, description, startingPrice, minIncrement, startsAt, endsAt}` | `201` `AuctionView` · `403` |
+| PUT | `/api/auctions/{id}` | ADMIN | `{expectedVersion, draft:{...}}` | `200` · `409 VERSION_CONFLICT` |
+
+Thử bằng `curl.exe` trong PowerShell:
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8080/api/register -H "Content-Type: application/json" -d '{\"username\":\"hoe\",\"password\":\"12345678\",\"displayName\":\"Hoè\"}'
+curl.exe -s http://127.0.0.1:8080/api/auctions?status=ACTIVE -H "Authorization: Bearer <token>"
+```
+
+### WebSocket (`ws://<server>:8080/ws`)
+
+Cùng định dạng thông điệp và cùng bộ lệnh với TCP (dùng chung `MessageRouter`); mỗi frame văn bản là một
+thông điệp, tối đa 64 KiB; kết nối im lặng quá 45 giây bị đóng (trình duyệt gửi `PING` mỗi 15 giây).
+
+1. Lấy token bằng REST `/api/login`.
+2. Mở `/ws`, gửi `AUTH` với `{"token":"..."}`, nhận `{user}`.
+3. `JOIN_AUCTION` `{"auctionId":1}` → snapshot `{auction, recentBids}`; từ đây nhận sự kiện của phiên.
+4. `PLACE_BID` `{"auctionId":1,"amount":280000}` → biên nhận; mọi người trong phòng nhận `AUCTION_UPDATED`.
+5. Sự kiện server đẩy: `AUCTION_STARTED`, `AUCTION_UPDATED`, `AUCTION_EXTENDED`, `AUCTION_FINISHED` (payload `AuctionView`).
+
+```json
+{"protocolVersion":1,"kind":"REQUEST","type":"AUTH","requestId":"7c1e...","payload":{"token":"q3Zk..."}}
+{"protocolVersion":1,"kind":"EVENT","type":"AUCTION_UPDATED","payload":{"auctionId":1,"currentPrice":280000,"version":8,"...":"..."}}
+```
+
+Mất kết nối thì trang web tự kết nối lại (chờ 1, 2, 4… tối đa 10 giây), gửi lại `AUTH` và `JOIN_AUCTION`.
 
 ---
 
