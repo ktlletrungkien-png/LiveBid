@@ -3,12 +3,15 @@ package com.livebid.client.ui;
 import com.livebid.client.ClientConfig;
 import com.livebid.client.net.ConnectionState;
 import com.livebid.client.net.MulticastListener;
+import com.livebid.client.net.ReconnectPolicy;
 import com.livebid.client.net.RemoteErrorException;
 import com.livebid.client.net.ServerConnection;
 import com.livebid.common.dto.AuctionDraft;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
+import com.livebid.common.dto.LoginResult;
 import com.livebid.common.dto.UserView;
+import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.UpdateAuctionPayload;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.Message;
@@ -19,21 +22,25 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import javax.swing.BorderFactory;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import javax.swing.border.EmptyBorder;
@@ -77,13 +84,30 @@ public final class MainFrame extends JFrame {
     private final JLabel statusLabel = new JLabel("Chưa kết nối");
     private final JLabel noticeLabel = new JLabel();
     private final JLabel userLabel = new JLabel();
+    private final JButton reconnectButton = new JButton("Kết nối lại");
     private final Timer noticeTimer = new Timer(NOTICE_MILLIS, e -> noticeLabel.setText(""));
+    private final Timer retryTimer = new Timer(0, e -> attemptReconnect());
+    private final ReconnectPolicy reconnectPolicy = new ReconnectPolicy();
 
     private LoginPanel loginPanel;
     private AuctionHubPanel hubPanel;
     private RoomPanel roomPanel;
     private UserView currentUser;
     private MulticastListener multicastListener;
+
+    /** Địa chỉ server lần kết nối gần nhất, dùng khi kết nối lại. */
+    private String lastHost = "";
+    private int lastPort;
+
+    /** Thông tin đăng nhập chỉ giữ trong bộ nhớ để đăng nhập lại sau khi mất kết nối; không ghi ra file. */
+    private String savedUsername;
+    private char[] savedPassword;
+
+    /** Phiên đang mở, để vào lại phòng sau khi kết nối lại; {@code null} khi đang ở danh sách. */
+    private Long openRoomId;
+
+    private boolean retryInProgress;
+    private boolean closing;
 
     public MainFrame(ClientConfig config) {
         super("LiveBid - Desktop client");
@@ -102,6 +126,10 @@ public final class MainFrame extends JFrame {
 
         noticeTimer.setRepeats(false);
         noticeLabel.setHorizontalAlignment(SwingConstants.CENTER);
+
+        retryTimer.setRepeats(false);
+        reconnectButton.setVisible(false);
+        reconnectButton.addActionListener(e -> retryNow());
 
         connection.addStateListener(state -> SwingUtilities.invokeLater(() -> onStateChanged(state)));
         connection.addErrorListener(error -> SwingUtilities.invokeLater(
@@ -130,7 +158,9 @@ public final class MainFrame extends JFrame {
     }
 
     /** Đã kết nối TCP: mở màn hình đăng nhập. Gọi trên EDT. */
-    public void onConnected() {
+    public void onConnected(String host, int port) {
+        lastHost = host == null ? "" : host.trim();
+        lastPort = port;
         if (loginPanel == null) {
             loginPanel = new LoginPanel(this);
             cardPanel.add(loginPanel, CARD_LOGIN);
@@ -141,8 +171,9 @@ public final class MainFrame extends JFrame {
     }
 
     /** Đăng nhập/đăng ký thành công: mở danh sách phiên và bật nhận thông báo multicast. Gọi trên EDT. */
-    public void onLoggedIn(UserView user) {
+    public void onLoggedIn(UserView user, String username, String password) {
         this.currentUser = user;
+        rememberCredentials(username, password);
         userLabel.setText("Người dùng: " + user.displayName());
         showList();
         startMulticast();
@@ -154,6 +185,7 @@ public final class MainFrame extends JFrame {
         if (currentUser == null) {
             return;
         }
+        openRoomId = null;
         closeRoom();
         if (hubPanel == null) {
             hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom,
@@ -170,6 +202,7 @@ public final class MainFrame extends JFrame {
             return;
         }
         closeRoom();
+        openRoomId = auctionId;
         RoomPanel panel = new RoomPanel(connection, auctionId, currentUser, this::showList);
         roomPanel = panel;
         cardPanel.add(panel, CARD_ROOM);
@@ -312,21 +345,160 @@ public final class MainFrame extends JFrame {
             case CONNECTING -> setStatus("Đang kết nối...");
             case CONNECTED -> setStatus("Đã kết nối tới server");
             case DISCONNECTED -> {
-                setStatus("Chưa kết nối tới server");
-                userLabel.setText("");
-                stopMulticast();
-                closeRoom();
-                if (hubPanel != null) {
-                    cardPanel.remove(hubPanel);
-                    hubPanel = null;
+                if (closing || retryInProgress) {
+                    return;
                 }
-                if (loginPanel != null) {
-                    cardPanel.remove(loginPanel);
-                    loginPanel = null;
+                if (savedUsername != null) {
+                    beginReconnect();
+                } else {
+                    resetToConnectScreen();
                 }
-                currentUser = null;
-                showConnect();
             }
+        }
+    }
+
+    /** Mất kết nối khi đang đăng nhập: giữ phiên, đóng phòng và hẹn thử lại. */
+    private void beginReconnect() {
+        closeRoom();
+        reconnectButton.setVisible(true);
+        if (hubPanel != null) {
+            cards.show(cardPanel, CARD_LIST);
+        } else {
+            showConnect();
+        }
+        scheduleRetry();
+    }
+
+    private void scheduleRetry() {
+        if (closing || savedUsername == null) {
+            return;
+        }
+        if (reconnectPolicy.exhausted()) {
+            setStatus("Không kết nối lại được sau " + reconnectPolicy.attempts()
+                    + " lần. Bấm “Kết nối lại” để thử tiếp.");
+            reconnectButton.setVisible(true);
+            return;
+        }
+        long delay = reconnectPolicy.nextDelayMillis();
+        setStatus("Mất kết nối. Thử lại sau " + (delay / 1_000) + " giây (lần "
+                + reconnectPolicy.attempts() + "/" + ReconnectPolicy.MAX_ATTEMPTS + ")...");
+        retryTimer.setInitialDelay((int) delay);
+        retryTimer.restart();
+    }
+
+    /** Bấm “Kết nối lại”: thử ngay, bỏ qua thời gian chờ còn lại. */
+    private void retryNow() {
+        retryTimer.stop();
+        reconnectPolicy.reset();
+        retryInProgress = false;
+        attemptReconnect();
+    }
+
+    private void attemptReconnect() {
+        if (closing || savedUsername == null || connection.isConnected()) {
+            return;
+        }
+        if (lastHost.isBlank() || lastPort <= 0) {
+            setStatus("Chưa biết địa chỉ server để kết nối lại.");
+            return;
+        }
+        retryInProgress = true;
+        reconnectButton.setEnabled(false);
+        setStatus("Đang kết nối lại tới " + lastHost + ":" + lastPort + "...");
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                connection.connect(lastHost, lastPort);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                reconnectButton.setEnabled(true);
+                try {
+                    get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    retryInProgress = false;
+                    return;
+                } catch (ExecutionException e) {
+                    retryInProgress = false;
+                    scheduleRetry();
+                    return;
+                }
+                relogin();
+            }
+        }.execute();
+    }
+
+    /** Kết nối TCP đã mở lại: đăng nhập bằng thông tin còn trong bộ nhớ rồi vào lại phòng nếu đang mở. */
+    private void relogin() {
+        char[] password = savedPassword;
+        String username = savedUsername;
+        if (username == null || password == null) {
+            retryInProgress = false;
+            resetToConnectScreen();
+            return;
+        }
+        setStatus("Đã kết nối lại, đang đăng nhập...");
+        connection.call(MessageType.LOGIN, new LoginPayload(username, new String(password)), LoginResult.class)
+                .whenComplete((result, error) -> SwingUtilities.invokeLater(() -> {
+                    retryInProgress = false;
+                    if (error != null) {
+                        setStatus("Không đăng nhập lại được: " + describeError(error));
+                        scheduleRetry();
+                        return;
+                    }
+                    reconnectPolicy.reset();
+                    reconnectButton.setVisible(false);
+                    currentUser = result.user();
+                    userLabel.setText("Người dùng: " + result.user().displayName());
+                    setStatus("Đã kết nối lại: " + result.user().displayName());
+                    if (openRoomId != null) {
+                        openRoom(openRoomId);
+                    } else if (hubPanel != null) {
+                        hubPanel.refresh();
+                    } else {
+                        showList();
+                    }
+                }));
+    }
+
+    /** Dọn toàn bộ màn hình phiên và quay về màn hình Kết nối (chưa đăng nhập hoặc đã đóng). */
+    private void resetToConnectScreen() {
+        retryTimer.stop();
+        reconnectPolicy.reset();
+        retryInProgress = false;
+        reconnectButton.setVisible(false);
+        setStatus("Chưa kết nối tới server");
+        userLabel.setText("");
+        stopMulticast();
+        closeRoom();
+        if (hubPanel != null) {
+            cardPanel.remove(hubPanel);
+            hubPanel = null;
+        }
+        if (loginPanel != null) {
+            cardPanel.remove(loginPanel);
+            loginPanel = null;
+        }
+        currentUser = null;
+        openRoomId = null;
+        clearCredentials();
+        showConnect();
+    }
+
+    private void rememberCredentials(String username, String password) {
+        clearCredentials();
+        savedUsername = username;
+        savedPassword = password == null ? new char[0] : password.toCharArray();
+    }
+
+    private void clearCredentials() {
+        savedUsername = null;
+        if (savedPassword != null) {
+            Arrays.fill(savedPassword, '\0');
+            savedPassword = null;
         }
     }
 
@@ -337,11 +509,18 @@ public final class MainFrame extends JFrame {
                 new EmptyBorder(6, 10, 6, 10)));
         bar.add(statusLabel, BorderLayout.WEST);
         bar.add(noticeLabel, BorderLayout.CENTER);
-        bar.add(userLabel, BorderLayout.EAST);
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.add(reconnectButton);
+        right.add(userLabel);
+        bar.add(right, BorderLayout.EAST);
         return bar;
     }
 
     private void shutdown() {
+        closing = true;
+        retryTimer.stop();
+        clearCredentials();
         stopMulticast();
         connection.close();
         dispose();

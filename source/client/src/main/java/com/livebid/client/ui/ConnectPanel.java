@@ -158,7 +158,7 @@ final class ConnectPanel extends JPanel {
                 setBusy(false, " ");
                 try {
                     get();
-                    mainFrame.onConnected();
+                    mainFrame.onConnected(host, port);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
