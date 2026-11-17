@@ -4,6 +4,7 @@ import com.livebid.client.ClientConfig;
 import com.livebid.client.net.ConnectionState;
 import com.livebid.client.net.RemoteErrorException;
 import com.livebid.client.net.ServerConnection;
+import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.UserView;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -189,11 +190,7 @@ public final class MainFrame extends JFrame {
      * Câu thông báo tiếng Việt cho một lỗi bất đồng bộ: lỗi nghiệp vụ của server, hết giờ, hay lỗi mạng.
      */
     static String describeError(Throwable error) {
-        Throwable cause = error;
-        while ((cause instanceof CompletionException || cause instanceof ExecutionException)
-                && cause.getCause() != null) {
-            cause = cause.getCause();
-        }
+        Throwable cause = unwrap(error);
         if (cause instanceof RemoteErrorException remote) {
             return remote.error().message();
         }
@@ -205,5 +202,27 @@ public final class MainFrame extends JFrame {
         }
         String message = cause.getMessage();
         return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
+    }
+
+    /** Bóc {@link CompletionException}/{@link ExecutionException} để lấy nguyên nhân thật của lỗi. */
+    static Throwable unwrap(Throwable error) {
+        Throwable cause = error;
+        while ((cause instanceof CompletionException || cause instanceof ExecutionException)
+                && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
+    }
+
+    /** Nhãn tiếng Việt cho trạng thái phiên, dùng chung cho bảng và phòng đấu giá. */
+    static String statusText(AuctionStatus status) {
+        if (status == null) {
+            return "Không rõ";
+        }
+        return switch (status) {
+            case SCHEDULED -> "Sắp bắt đầu";
+            case ACTIVE -> "Đang diễn ra";
+            case FINISHED -> "Đã kết thúc";
+        };
     }
 }
