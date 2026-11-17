@@ -5,9 +5,12 @@ import com.livebid.client.net.ConnectionState;
 import com.livebid.client.net.MulticastListener;
 import com.livebid.client.net.RemoteErrorException;
 import com.livebid.client.net.ServerConnection;
+import com.livebid.common.dto.AuctionDraft;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.UserView;
+import com.livebid.common.payload.UpdateAuctionPayload;
+import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.Message;
 import com.livebid.common.protocol.MessageType;
 import com.livebid.common.protocol.ProtocolException;
@@ -21,6 +24,7 @@ import java.awt.event.WindowEvent;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -76,7 +80,7 @@ public final class MainFrame extends JFrame {
     private final Timer noticeTimer = new Timer(NOTICE_MILLIS, e -> noticeLabel.setText(""));
 
     private LoginPanel loginPanel;
-    private AuctionListPanel listPanel;
+    private AuctionHubPanel hubPanel;
     private RoomPanel roomPanel;
     private UserView currentUser;
     private MulticastListener multicastListener;
@@ -151,12 +155,13 @@ public final class MainFrame extends JFrame {
             return;
         }
         closeRoom();
-        if (listPanel == null) {
-            listPanel = new AuctionListPanel(connection, currentUser, this::openRoom);
-            cardPanel.add(listPanel, CARD_LIST);
+        if (hubPanel == null) {
+            hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom,
+                    this::createAuction, this::editAuction);
+            cardPanel.add(hubPanel, CARD_LIST);
         }
         cards.show(cardPanel, CARD_LIST);
-        listPanel.refresh();
+        hubPanel.refresh();
     }
 
     /** Mở phòng đấu giá của một phiên: gửi {@code JOIN_AUCTION} rồi hiện {@link RoomPanel}. Gọi trên EDT. */
@@ -170,6 +175,69 @@ public final class MainFrame extends JFrame {
         cardPanel.add(panel, CARD_ROOM);
         cards.show(cardPanel, CARD_ROOM);
         panel.join();
+    }
+
+    /** Mở form tạo phiên rồi gửi {@code CREATE_AUCTION}. Gọi trên EDT. */
+    private void createAuction() {
+        if (!connection.isConnected()) {
+            setStatus("Chưa kết nối tới server.");
+            return;
+        }
+        Optional<AuctionDraft> draft = AuctionFormDialog.showCreate(this, System.currentTimeMillis());
+        if (draft.isEmpty()) {
+            return;
+        }
+        setStatus("Đang tạo phiên...");
+        connection.call(MessageType.CREATE_AUCTION, draft.get(), AuctionView.class)
+                .whenComplete((created, error) -> SwingUtilities.invokeLater(() -> {
+                    if (error != null) {
+                        setStatus("Không tạo được phiên: " + describeError(error));
+                        return;
+                    }
+                    setStatus("Đã tạo phiên #" + created.auctionId() + " «" + created.title() + "».");
+                    if (hubPanel != null) {
+                        hubPanel.refresh();
+                    }
+                }));
+    }
+
+    /** Mở form sửa phiên đang chọn rồi gửi {@code UPDATE_AUCTION} với {@code expectedVersion}. Gọi trên EDT. */
+    private void editAuction(AuctionView auction) {
+        if (!connection.isConnected()) {
+            setStatus("Chưa kết nối tới server.");
+            return;
+        }
+        Optional<AuctionDraft> draft = AuctionFormDialog.showEdit(this, auction, System.currentTimeMillis());
+        if (draft.isEmpty()) {
+            return;
+        }
+        setStatus("Đang lưu phiên #" + auction.auctionId() + "...");
+        connection.call(MessageType.UPDATE_AUCTION,
+                        new UpdateAuctionPayload(auction.auctionId(), auction.version(), draft.get()),
+                        AuctionView.class)
+                .whenComplete((updated, error) -> SwingUtilities.invokeLater(() -> {
+                    if (error != null) {
+                        handleUpdateError(error);
+                        return;
+                    }
+                    setStatus("Đã lưu phiên #" + updated.auctionId() + " «" + updated.title() + "».");
+                    if (hubPanel != null) {
+                        hubPanel.refresh();
+                    }
+                }));
+    }
+
+    private void handleUpdateError(Throwable error) {
+        Throwable cause = unwrap(error);
+        if (cause instanceof RemoteErrorException remote
+                && remote.error().code() == ErrorCode.VERSION_CONFLICT) {
+            setStatus("Phiên đã bị thay đổi, hãy tải lại rồi sửa.");
+            if (hubPanel != null) {
+                hubPanel.refresh();
+            }
+            return;
+        }
+        setStatus("Không lưu được phiên: " + describeError(error));
     }
 
     /** Cập nhật thanh trạng thái; gọi được từ bất kỳ luồng nào. */
@@ -248,9 +316,9 @@ public final class MainFrame extends JFrame {
                 userLabel.setText("");
                 stopMulticast();
                 closeRoom();
-                if (listPanel != null) {
-                    cardPanel.remove(listPanel);
-                    listPanel = null;
+                if (hubPanel != null) {
+                    cardPanel.remove(hubPanel);
+                    hubPanel = null;
                 }
                 if (loginPanel != null) {
                     cardPanel.remove(loginPanel);
