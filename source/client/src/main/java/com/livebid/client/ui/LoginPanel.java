@@ -154,7 +154,7 @@ final class LoginPanel extends JPanel {
                         return;
                     }
                     loginPassword.setText("");
-                    mainFrame.onLoggedIn(result.user());
+                    mainFrame.onLoggedIn(result.user(), username, password);
                 }));
     }
 
@@ -179,7 +179,7 @@ final class LoginPanel extends JPanel {
                         return;
                     }
                     registerPassword.setText("");
-                    mainFrame.onLoggedIn(result.user());
+                    mainFrame.onLoggedIn(result.user(), username, password);
                 }));
     }
 

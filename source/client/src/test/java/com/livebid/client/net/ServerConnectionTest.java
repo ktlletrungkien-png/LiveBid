@@ -210,6 +210,36 @@ class ServerConnectionTest {
         assertEquals("Bình", bids.get(1).bidderDisplayName());
     }
 
+    @Test
+    void ketNoiLaiDuocSauKhiMatKetNoi() throws Exception {
+        server = new FakeServer();
+        connection = new ServerConnection();
+        connection.connect("127.0.0.1", server.port());
+
+        CountDownLatch disconnected = new CountDownLatch(1);
+        connection.addStateListener(state -> {
+            if (state == ConnectionState.DISCONNECTED) {
+                disconnected.countDown();
+            }
+        });
+        server.closeClient();
+        assertTrue(disconnected.await(WAIT_SECONDS, TimeUnit.SECONDS), "Phải báo mất kết nối trước");
+        assertEquals(ConnectionState.DISCONNECTED, connection.state());
+
+        FakeServer second = new FakeServer();
+        try {
+            connection.connect("127.0.0.1", second.port());
+            assertTrue(connection.isConnected(), "Cùng một ServerConnection phải kết nối lại được");
+
+            CompletableFuture<Message> future = connection.request(MessageType.PING, null);
+            Message request = second.readRequest();
+            second.send(Message.success(request, Map.of("which", "reconnected")));
+            assertEquals("reconnected", which(future.get(WAIT_SECONDS, TimeUnit.SECONDS)));
+        } finally {
+            second.close();
+        }
+    }
+
     private static String which(Message message) {
         return message.payload().getAsJsonObject().get("which").getAsString();
     }

@@ -2,10 +2,10 @@ package com.livebid.client.ui;
 
 import com.google.gson.reflect.TypeToken;
 import com.livebid.client.net.ServerConnection;
-import com.livebid.client.room.MoneyFormat;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.PageResult;
+import com.livebid.common.dto.Role;
 import com.livebid.common.dto.UserView;
 import com.livebid.common.payload.ListAuctionsPayload;
 import com.livebid.common.protocol.MessageType;
@@ -16,6 +16,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.lang.reflect.Type;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -26,7 +27,6 @@ import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
-import javax.swing.table.AbstractTableModel;
 
 /**
  * Danh sách phiên đấu giá sau khi đăng nhập: bảng, bộ lọc trạng thái, phân trang và mở phòng bằng cách
@@ -48,11 +48,15 @@ final class AuctionListPanel extends JPanel {
     private final ServerConnection connection;
     private final UserView user;
     private final LongConsumer openAuction;
+    private final Runnable createAuction;
+    private final Consumer<AuctionView> editAuction;
 
     private final AuctionTableModel model = new AuctionTableModel();
     private final JTable table = new JTable(model);
     private final JComboBox<StatusFilter> statusFilter = new JComboBox<>(StatusFilter.values());
     private final JButton refreshButton = new JButton("Làm mới");
+    private final JButton createButton = new JButton("Tạo phiên");
+    private final JButton editButton = new JButton("Sửa phiên");
     private final JButton previousButton = new JButton("‹ Trang trước");
     private final JButton nextButton = new JButton("Trang sau ›");
     private final JLabel pageLabel = new JLabel();
@@ -63,9 +67,20 @@ final class AuctionListPanel extends JPanel {
     private boolean loading;
 
     AuctionListPanel(ServerConnection connection, UserView user, LongConsumer openAuction) {
+        this(connection, user, openAuction, null, null);
+    }
+
+    /**
+     * @param createAuction mở form tạo phiên; {@code null} thì không hiện nút (người dùng thường)
+     * @param editAuction   mở form sửa phiên đang chọn; {@code null} thì không hiện nút
+     */
+    AuctionListPanel(ServerConnection connection, UserView user, LongConsumer openAuction,
+            Runnable createAuction, Consumer<AuctionView> editAuction) {
         this.connection = connection;
         this.user = user;
         this.openAuction = openAuction;
+        this.createAuction = createAuction;
+        this.editAuction = editAuction;
 
         setLayout(new BorderLayout(0, 8));
         setBorder(new EmptyBorder(12, 12, 12, 12));
@@ -92,6 +107,13 @@ final class AuctionListPanel extends JPanel {
         previousButton.addActionListener(e -> load(Math.max(1, page - 1)));
         nextButton.addActionListener(e -> load(page + 1));
         statusFilter.addActionListener(e -> load(1));
+        createButton.addActionListener(e -> {
+            if (createAuction != null) {
+                createAuction.run();
+            }
+        });
+        editButton.addActionListener(e -> editSelected());
+        table.getSelectionModel().addListSelectionListener(e -> updateEditButton());
 
         updatePager();
     }
@@ -115,6 +137,12 @@ final class AuctionListPanel extends JPanel {
         toolbar.add(previousButton);
         toolbar.add(nextButton);
         toolbar.add(pageLabel);
+        if (user.role() == Role.ADMIN && createAuction != null) {
+            toolbar.add(createButton);
+        }
+        if (user.role() == Role.ADMIN && editAuction != null) {
+            toolbar.add(editButton);
+        }
         header.add(toolbar, BorderLayout.CENTER);
 
         return header;
@@ -178,12 +206,40 @@ final class AuctionListPanel extends JPanel {
         }
     }
 
+    private void editSelected() {
+        AuctionView auction = selectedAuction();
+        if (auction == null) {
+            setMessage("Hãy chọn một phiên để sửa.");
+            return;
+        }
+        if (auction.status() != AuctionStatus.SCHEDULED) {
+            setMessage("Chỉ sửa được phiên chưa bắt đầu.");
+            return;
+        }
+        if (editAuction != null) {
+            editAuction.accept(auction);
+        }
+    }
+
+    private AuctionView selectedAuction() {
+        int row = table.getSelectedRow();
+        return row < 0 ? null : model.rowAt(table.convertRowIndexToModel(row));
+    }
+
+    private void updateEditButton() {
+        AuctionView auction = selectedAuction();
+        editButton.setEnabled(!loading && editAuction != null
+                && auction != null && auction.status() == AuctionStatus.SCHEDULED);
+        createButton.setEnabled(!loading && createAuction != null);
+    }
+
     private void updatePager() {
         pageLabel.setText("Trang " + page);
         statusFilter.setEnabled(!loading);
         refreshButton.setEnabled(!loading);
         previousButton.setEnabled(!loading && page > 1);
         nextButton.setEnabled(!loading && hasMore);
+        updateEditButton();
     }
 
     private void setMessage(String message) {
@@ -208,58 +264,6 @@ final class AuctionListPanel extends JPanel {
         @Override
         public String toString() {
             return label;
-        }
-    }
-
-    /** Bảng chỉ đọc; giữ luôn danh sách gốc để lấy lại {@link AuctionView} của dòng được chọn. */
-    private static final class AuctionTableModel extends AbstractTableModel {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final String[] COLUMNS = {"Tên", "Giá hiện tại", "Trạng thái", "Bắt đầu", "Kết thúc"};
-
-        private List<AuctionView> rows = List.of();
-
-        void setRows(List<AuctionView> rows) {
-            this.rows = rows == null ? List.of() : List.copyOf(rows);
-            fireTableDataChanged();
-        }
-
-        AuctionView rowAt(int index) {
-            return index >= 0 && index < rows.size() ? rows.get(index) : null;
-        }
-
-        @Override
-        public int getRowCount() {
-            return rows.size();
-        }
-
-        @Override
-        public int getColumnCount() {
-            return COLUMNS.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMNS[column];
-        }
-
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-
-        @Override
-        public Object getValueAt(int rowIndex, int columnIndex) {
-            AuctionView auction = rows.get(rowIndex);
-            return switch (columnIndex) {
-                case 0 -> auction.title();
-                case 1 -> MoneyFormat.format(auction.currentPrice());
-                case 2 -> MainFrame.statusText(auction.status());
-                case 3 -> TimeFormat.dateTime(auction.startsAt());
-                case 4 -> TimeFormat.dateTime(auction.endsAt());
-                default -> "";
-            };
         }
     }
 }
