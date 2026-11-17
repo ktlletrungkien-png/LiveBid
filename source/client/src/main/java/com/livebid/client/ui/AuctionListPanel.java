@@ -2,7 +2,6 @@ package com.livebid.client.ui;
 
 import com.google.gson.reflect.TypeToken;
 import com.livebid.client.net.ServerConnection;
-import com.livebid.client.room.MoneyFormat;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.PageResult;
@@ -26,7 +25,6 @@ import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
-import javax.swing.table.AbstractTableModel;
 
 /**
  * Danh sách phiên đấu giá sau khi đăng nhập: bảng, bộ lọc trạng thái, phân trang và mở phòng bằng cách
@@ -208,58 +206,6 @@ final class AuctionListPanel extends JPanel {
         @Override
         public String toString() {
             return label;
-        }
-    }
-
-    /** Bảng chỉ đọc; giữ luôn danh sách gốc để lấy lại {@link AuctionView} của dòng được chọn. */
-    private static final class AuctionTableModel extends AbstractTableModel {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final String[] COLUMNS = {"Tên", "Giá hiện tại", "Trạng thái", "Bắt đầu", "Kết thúc"};
-
-        private List<AuctionView> rows = List.of();
-
-        void setRows(List<AuctionView> rows) {
-            this.rows = rows == null ? List.of() : List.copyOf(rows);
-            fireTableDataChanged();
-        }
-
-        AuctionView rowAt(int index) {
-            return index >= 0 && index < rows.size() ? rows.get(index) : null;
-        }
-
-        @Override
-        public int getRowCount() {
-            return rows.size();
-        }
-
-        @Override
-        public int getColumnCount() {
-            return COLUMNS.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMNS[column];
-        }
-
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-
-        @Override
-        public Object getValueAt(int rowIndex, int columnIndex) {
-            AuctionView auction = rows.get(rowIndex);
-            return switch (columnIndex) {
-                case 0 -> auction.title();
-                case 1 -> MoneyFormat.format(auction.currentPrice());
-                case 2 -> MainFrame.statusText(auction.status());
-                case 3 -> TimeFormat.dateTime(auction.startsAt());
-                case 4 -> TimeFormat.dateTime(auction.endsAt());
-                default -> "";
-            };
         }
     }
 }
