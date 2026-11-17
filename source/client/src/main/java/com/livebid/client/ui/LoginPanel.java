@@ -24,7 +24,7 @@ import javax.swing.border.EmptyBorder;
  * Màn hình đăng nhập / đăng ký sau khi đã kết nối TCP.
  *
  * <p>Qua TCP, kết nối tự giữ trạng thái đăng nhập nên không cần token. Đăng nhập thành công thì
- * {@link MainFrame#onLoggedIn} mở màn hình tạm "Đã đăng nhập: ..." cho tới khi M5 có danh sách phiên.
+ * {@link MainFrame#onLoggedIn} mở danh sách phiên đấu giá.
  *
  * <p>Yêu cầu mạng chạy trên luồng của {@link ServerConnection}; callback được chuyển về EDT bằng
  * {@link SwingUtilities#invokeLater}. Lỗi nghiệp vụ hiện nguyên câu tiếng Việt của server.
