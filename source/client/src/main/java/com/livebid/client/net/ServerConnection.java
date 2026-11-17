@@ -1,5 +1,7 @@
 package com.livebid.client.net;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 import com.livebid.common.Protocol;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.ErrorInfo;
@@ -13,6 +15,7 @@ import com.livebid.common.transport.LineFrameDecoder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Type;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -186,6 +189,32 @@ public final class ServerConnection implements AutoCloseable {
                 return message.payloadAs(resultType);
             } catch (ProtocolException e) {
                 throw new CompletionException(e);
+            }
+        });
+    }
+
+    /**
+     * Như {@link #call(MessageType, Object, Class)} nhưng nhận {@link Type} để đọc kết quả có generic —
+     * ví dụ {@code new TypeToken<PageResult<AuctionView>>() { }.getType()}.
+     *
+     * <p>Cần bản này vì {@code PageResult<AuctionView>} và {@code List<BidView>} mất thông tin generic khi
+     * chỉ truyền {@code Class}.
+     */
+    public <T> CompletableFuture<T> call(MessageType type, Object payload, Type resultType) {
+        Objects.requireNonNull(resultType, "resultType");
+        return request(type, payload).thenApply(message -> {
+            if (!message.isSuccess()) {
+                throw new CompletionException(new RemoteErrorException(errorOf(message)));
+            }
+            JsonElement element = message.payload();
+            if (element == null || element.isJsonNull()) {
+                return null;
+            }
+            try {
+                return JsonCodec.gson().fromJson(element, resultType);
+            } catch (JsonParseException | IllegalStateException | NumberFormatException e) {
+                throw new CompletionException(
+                        new ProtocolException(ErrorCode.INVALID_MESSAGE, "payload không đúng định dạng", e));
             }
         });
     }
