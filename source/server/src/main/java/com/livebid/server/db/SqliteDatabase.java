@@ -31,8 +31,14 @@ public final class SqliteDatabase implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(SqliteDatabase.class);
 
+    /** Một bước migration kèm cờ có cần tắt khóa ngoại (dùng khi dựng lại bảng bị tham chiếu). */
+    private record MigrationStep(String resource, boolean disableForeignKeys) {
+    }
+
     /** Danh sách migration theo thứ tự tăng dần. Thêm bản mới vào cuối, không sửa bản cũ đã chạy. */
-    private static final List<String> MIGRATIONS = List.of("db/V1__init.sql");
+    private static final List<MigrationStep> MIGRATIONS = List.of(
+            new MigrationStep("db/V1__init.sql", false),
+            new MigrationStep("db/V2__auction_approval.sql", true));
 
     private static final Pattern VERSION_PATTERN = Pattern.compile("V(\\d+)__");
 
@@ -105,10 +111,10 @@ public final class SqliteDatabase implements AutoCloseable {
         try {
             ensureVersionTable();
             int current = currentVersion();
-            for (String resource : MIGRATIONS) {
-                int version = versionOf(resource);
+            for (MigrationStep step : MIGRATIONS) {
+                int version = versionOf(step.resource());
                 if (version > current) {
-                    applyMigration(resource, version);
+                    applyMigration(step, version);
                     current = version;
                 }
             }
@@ -131,30 +137,55 @@ public final class SqliteDatabase implements AutoCloseable {
         }
     }
 
-    private void applyMigration(String resource, int version) throws SQLException {
-        log.info("Chạy migration {} (phiên bản {})", resource, version);
-        List<String> statements = readStatements(resource);
+    private void applyMigration(MigrationStep step, int version) throws SQLException {
+        log.info("Chạy migration {} (phiên bản {})", step.resource(), version);
+        List<String> statements = readStatements(step.resource());
         boolean previousAutoCommit = connection.getAutoCommit();
-        connection.setAutoCommit(false);
-        try {
+        if (step.disableForeignKeys()) {
+            // SQLite không cho đổi PRAGMA foreign_keys khi đang ở trong transaction.
             try (Statement st = connection.createStatement()) {
-                for (String sql : statements) {
-                    st.execute(sql);
-                }
-                st.execute("DELETE FROM schema_version");
-                st.execute("INSERT INTO schema_version (version) VALUES (" + version + ")");
+                st.execute("PRAGMA foreign_keys = OFF");
             }
-            connection.commit();
-        } catch (SQLException e) {
-            connection.rollback();
-            throw e;
+        }
+        try {
+            connection.setAutoCommit(false);
+            try {
+                try (Statement st = connection.createStatement()) {
+                    for (String sql : statements) {
+                        st.execute(sql);
+                    }
+                    if (step.disableForeignKeys()) {
+                        verifyForeignKeys(st);
+                    }
+                    st.execute("DELETE FROM schema_version");
+                    st.execute("INSERT INTO schema_version (version) VALUES (" + version + ")");
+                }
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(previousAutoCommit);
+            }
         } finally {
-            connection.setAutoCommit(previousAutoCommit);
+            if (step.disableForeignKeys()) {
+                try (Statement st = connection.createStatement()) {
+                    st.execute("PRAGMA foreign_keys = ON");
+                }
+            }
+        }
+    }
+
+    private static void verifyForeignKeys(Statement st) throws SQLException {
+        try (var rs = st.executeQuery("PRAGMA foreign_key_check")) {
+            if (rs.next()) {
+                throw new SQLException("Vi phạm khóa ngoại sau migration ở bảng " + rs.getString("table"));
+            }
         }
     }
 
     /** Đọc file SQL từ classpath, bỏ dòng chú thích {@code --} và tách theo dấu {@code ;}. */
-    static List<String> readStatements(String resource) {
+    public static List<String> readStatements(String resource) {
         String text;
         try (InputStream in = SqliteDatabase.class.getClassLoader().getResourceAsStream(resource)) {
             if (in == null) {

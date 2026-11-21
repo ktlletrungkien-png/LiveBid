@@ -560,6 +560,8 @@ public final class MainFrame extends JFrame {
             return "Không rõ";
         }
         return switch (status) {
+            case PENDING_APPROVAL -> "Chờ duyệt";
+            case REJECTED -> "Đã từ chối";
             case SCHEDULED -> "Sắp bắt đầu";
             case ACTIVE -> "Đang diễn ra";
             case FINISHED -> "Đã kết thúc";

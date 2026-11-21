@@ -5,5 +5,7 @@ public enum MyAuctionFilter {
     /** Các phiên mình đã đặt ít nhất một bid. */
     PARTICIPATED,
     /** Các phiên mình thắng. */
-    WON
+    WON,
+    /** Các phiên do chính mình đăng (mọi trạng thái). */
+    CREATED
 }

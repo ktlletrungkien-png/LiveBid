@@ -100,6 +100,7 @@ class RoomStateTest {
             long minIncrement, long currentPrice, boolean hasBids, String leader, long startsAt, long endsAt,
             long serverTime) {
         return new AuctionView(auctionId, "Phiên " + auctionId, "Mô tả", status, startingPrice, minIncrement,
-                currentPrice, hasBids, leader, null, startsAt, endsAt, 0, version, serverTime);
+                currentPrice, hasBids, leader, null, startsAt, endsAt, 0, version, serverTime,
+                1L, "Ban tổ chức", com.livebid.common.dto.Role.ADMIN, null);
     }
 }

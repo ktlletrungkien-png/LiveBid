@@ -10,6 +10,8 @@ public enum ErrorCode {
     UNAUTHORIZED(401),
     /** Đã đăng nhập nhưng không đủ quyền. */
     FORBIDDEN(403),
+    /** Người đăng tự đặt giá phiên của chính mình. */
+    OWN_AUCTION(403),
     /** Dữ liệu sai miền giá trị (giá âm, tên quá dài...). */
     VALIDATION_ERROR(400),
     USERNAME_TAKEN(409),
@@ -17,6 +19,10 @@ public enum ErrorCode {
     AUCTION_NOT_FOUND(404),
     AUCTION_NOT_STARTED(409),
     AUCTION_FINISHED(409),
+    /** Duyệt, từ chối, sửa hoặc hủy phiên không còn ở trạng thái PENDING_APPROVAL. */
+    AUCTION_NOT_PENDING(409),
+    /** USER đã đạt giới hạn phiên đang chờ duyệt cùng lúc. */
+    TOO_MANY_PENDING(409),
     /** Đặt giá khi chưa JOIN_AUCTION. */
     NOT_IN_ROOM(409),
     /** Giá thấp hơn mức tối thiểu; {@code details.minimumAllowed} chứa mức tối thiểu. */

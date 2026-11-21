@@ -7,6 +7,7 @@ import com.livebid.common.dto.BidReceipt;
 import com.livebid.common.dto.BidView;
 import com.livebid.common.dto.MyAuctionFilter;
 import com.livebid.common.dto.PageResult;
+import com.livebid.common.dto.Role;
 import com.livebid.common.dto.RoomSnapshot;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.Message;
@@ -61,6 +62,8 @@ public final class AuctionServiceImpl implements AuctionService {
     static final int MAX_PAGE = 100_000;
     static final int MAX_TITLE_LENGTH = 200;
     static final int MAX_DESCRIPTION_LENGTH = 5_000;
+    static final int MAX_REJECT_REASON_LENGTH = 500;
+    static final int MAX_PENDING_PER_USER = 5;
     static final int MAX_REQUEST_ID_LENGTH = 100;
     /** Số biên nhận gần nhất giữ lại để chống gửi trùng (chỉ trong bộ nhớ, mất khi restart). */
     static final int DEDUP_CACHE_SIZE = 10_000;
@@ -119,18 +122,19 @@ public final class AuctionServiceImpl implements AuctionService {
             }
             checkPageSize(pageSize, "pageSize");
             long now = clock.millis();
-            List<Auction> rows = auctions.findPage(status, (page - 1) * pageSize, pageSize + 1);
+            List<Auction> rows = auctions.findPublicPage(status, (page - 1) * pageSize, pageSize + 1);
             boolean hasMore = rows.size() > pageSize;
-            List<AuctionView> items = rows.stream().limit(pageSize).map(a -> toView(a, now)).toList();
+            List<AuctionView> items = rows.stream().limit(pageSize).map(a -> toView(a, now, false)).toList();
             return new PageResult<>(items, page, pageSize, hasMore);
         });
     }
 
     @Override
-    public CompletableFuture<AuctionView> getAuction(long auctionId) {
+    public CompletableFuture<AuctionView> getAuction(UserPrincipal viewer, long auctionId) {
         return executor.submit(() -> {
             long now = clock.millis();
-            return toView(advance(load(auctionId), now), now);
+            Auction current = advance(loadVisible(viewer, auctionId), now);
+            return toView(current, now, canSeePrivateFields(viewer, current));
         });
     }
 
@@ -138,7 +142,10 @@ public final class AuctionServiceImpl implements AuctionService {
     public CompletableFuture<List<BidView>> getBidHistory(long auctionId, Long beforeBidId, int limit) {
         return executor.submit(() -> {
             checkPageSize(limit, "limit");
-            load(auctionId);
+            Auction auction = load(auctionId);
+            if (!isPublicStatus(auction.status())) {
+                throw notFound(auctionId);
+            }
             return bids.findHistory(auctionId, beforeBidId, limit).stream().map(this::toView).toList();
         });
     }
@@ -148,14 +155,16 @@ public final class AuctionServiceImpl implements AuctionService {
         return executor.submit(() -> {
             requireUser(user);
             if (filter == null) {
-                throw validation("Thiếu filter (PARTICIPATED hoặc WON)");
+                throw validation("Thiếu filter (PARTICIPATED, WON hoặc CREATED)");
             }
             long now = clock.millis();
+            boolean includePrivate = filter == MyAuctionFilter.CREATED;
             List<Auction> rows = switch (filter) {
                 case PARTICIPATED -> auctions.findParticipatedBy(user.userId());
                 case WON -> auctions.findWonBy(user.userId());
+                case CREATED -> auctions.findCreatedBy(user.userId());
             };
-            return rows.stream().map(a -> toView(a, now)).toList();
+            return rows.stream().map(a -> toView(a, now, includePrivate)).toList();
         });
     }
 
@@ -167,11 +176,14 @@ public final class AuctionServiceImpl implements AuctionService {
             requireUser(user);
             Objects.requireNonNull(channel, "channel");
             long now = clock.millis();
-            Auction auction = advance(load(auctionId), now);
+            Auction auction = advance(loadVisible(user, auctionId), now);
+            if (!isPublicStatus(auction.status())) {
+                throw validation("Phiên chưa được duyệt, chưa thể vào phòng đấu giá");
+            }
             rooms.join(channel, auctionId);
             List<BidView> recent = bids.findHistory(auctionId, null, settings.snapshotBidCount())
                     .stream().map(this::toView).toList();
-            return new RoomSnapshot(toView(auction, now), recent);
+            return new RoomSnapshot(toView(auction, now, false), recent);
         });
     }
 
@@ -214,8 +226,11 @@ public final class AuctionServiceImpl implements AuctionService {
             }
 
             long now = clock.millis();
-            Auction auction = advance(load(auctionId), now);
+            Auction auction = advance(loadVisible(user, auctionId), now);
 
+            if (auction.createdBy() == user.userId()) {
+                throw new ServiceException(ErrorCode.OWN_AUCTION, "Bạn không thể tự đặt giá phiên do mình đăng");
+            }
             if (!rooms.isInRoom(channel, auctionId)) {
                 throw new ServiceException(ErrorCode.NOT_IN_ROOM, "Hãy vào phòng đấu giá trước khi đặt giá");
             }
@@ -253,42 +268,66 @@ public final class AuctionServiceImpl implements AuctionService {
             }
             // Một sự kiện duy nhất: client bỏ qua bản cùng version, nên gửi hai sự kiện thì bản sau bị mất.
             MessageType event = extend ? MessageType.AUCTION_EXTENDED : MessageType.AUCTION_UPDATED;
-            rooms.broadcast(auctionId, Message.event(event, toView(outcome.auction(), now)));
+            rooms.broadcast(auctionId, Message.event(event, toView(outcome.auction(), now, false)));
             return receipt;
         });
     }
 
-    // ================================================================== quản trị
+    // ================================================================== tạo, sửa, hủy & kiểm duyệt
 
     @Override
-    public CompletableFuture<AuctionView> createAuction(UserPrincipal admin, AuctionDraft draft) {
+    public CompletableFuture<AuctionView> createAuction(UserPrincipal user, AuctionDraft draft) {
         return executor.submit(() -> {
-            requireAdmin(admin);
+            requireUser(user);
             long now = clock.millis();
             AuctionDraft clean = validateDraft(draft, now);
+            AuctionStatus initialStatus;
+            if (user.isAdmin()) {
+                initialStatus = AuctionStatus.SCHEDULED;
+            } else {
+                checkUserLeadTime(clean.startsAt(), now);
+                if (auctions.countPendingBy(user.userId()) >= MAX_PENDING_PER_USER) {
+                    throw new ServiceException(ErrorCode.TOO_MANY_PENDING,
+                            "Bạn đã có tối đa " + MAX_PENDING_PER_USER + " phiên đang chờ duyệt");
+                }
+                initialStatus = AuctionStatus.PENDING_APPROVAL;
+            }
             Auction created = transactions.inTransaction(() -> auctions.insert(new NewAuction(
                     clean.title(), clean.description(), clean.startingPrice(), clean.minIncrement(),
-                    clean.startsAt(), clean.endsAt(), admin.userId(), now)));
-            log.info("{} tạo phiên #{} \"{}\"", admin.username(), created.id(), created.title());
-            return toView(created, now);
+                    clean.startsAt(), clean.endsAt(), user.userId(), now, initialStatus)));
+            log.info("{} tạo phiên #{} \"{}\" ({})", user.username(), created.id(), created.title(), initialStatus);
+            return toView(created, now, true);
         });
     }
 
     @Override
-    public CompletableFuture<AuctionView> updateAuction(UserPrincipal admin, long auctionId,
+    public CompletableFuture<AuctionView> updateAuction(UserPrincipal user, long auctionId,
                                                         long expectedVersion, AuctionDraft draft) {
         return executor.submit(() -> {
-            requireAdmin(admin);
+            requireUser(user);
             long now = clock.millis();
-            Auction current = advance(load(auctionId), now);
+            Auction current = advance(loadVisible(user, auctionId), now);
+            if (user.isAdmin()) {
+                if (current.status() != AuctionStatus.SCHEDULED) {
+                    throw validation("Chỉ sửa được phiên chưa bắt đầu");
+                }
+            } else {
+                if (current.createdBy() != user.userId()) {
+                    throw new ServiceException(ErrorCode.FORBIDDEN, "Bạn không có quyền sửa phiên này");
+                }
+                if (current.status() != AuctionStatus.PENDING_APPROVAL) {
+                    throw new ServiceException(ErrorCode.AUCTION_NOT_PENDING,
+                            "Chỉ sửa được phiên khi đang chờ duyệt");
+                }
+            }
             if (current.version() != expectedVersion) {
                 throw new ServiceException(ErrorCode.VERSION_CONFLICT,
                         "Phiên đã bị thay đổi, hãy tải lại rồi sửa", Map.of("currentVersion", current.version()));
             }
-            if (current.status() != AuctionStatus.SCHEDULED) {
-                throw validation("Chỉ sửa được phiên chưa bắt đầu");
-            }
             AuctionDraft clean = validateDraft(draft, now);
+            if (!user.isAdmin()) {
+                checkUserLeadTime(clean.startsAt(), now);
+            }
             Auction updated = current.withDetails(clean.title(), clean.description(), clean.startingPrice(),
                     clean.minIncrement(), clean.startsAt(), clean.endsAt());
             transactions.inTransaction(() -> {
@@ -296,9 +335,89 @@ public final class AuctionServiceImpl implements AuctionService {
                 return null;
             });
             announced.remove(auctionId); // giờ mở có thể đã đổi: thông báo lại
-            AuctionView view = toView(updated, now);
-            rooms.broadcast(auctionId, Message.event(MessageType.AUCTION_UPDATED, view));
+            AuctionView view = toView(updated, now, canSeePrivateFields(user, updated));
+            if (isPublicStatus(updated.status())) {
+                rooms.broadcast(auctionId, Message.event(MessageType.AUCTION_UPDATED, toView(updated, now, false)));
+            }
             return view;
+        });
+    }
+
+    @Override
+    public CompletableFuture<Void> cancelAuction(UserPrincipal user, long auctionId) {
+        return executor.run(() -> {
+            requireUser(user);
+            Auction current = loadVisible(user, auctionId);
+            if (current.createdBy() != user.userId()) {
+                throw new ServiceException(ErrorCode.FORBIDDEN, "Chỉ chủ phiên được hủy phiên này");
+            }
+            if (current.status() != AuctionStatus.PENDING_APPROVAL) {
+                throw new ServiceException(ErrorCode.AUCTION_NOT_PENDING, "Chỉ hủy được phiên đang chờ duyệt");
+            }
+            boolean deleted = transactions.inTransaction(() -> auctions.deleteIfPending(auctionId));
+            if (!deleted) {
+                throw new ServiceException(ErrorCode.AUCTION_NOT_PENDING, "Phiên không còn ở trạng thái chờ duyệt");
+            }
+            log.info("{} đã hủy phiên chờ duyệt #{}", user.username(), auctionId);
+        });
+    }
+
+    @Override
+    public CompletableFuture<List<AuctionView>> getPendingAuctions(UserPrincipal admin) {
+        return executor.submit(() -> {
+            requireAdmin(admin);
+            long now = clock.millis();
+            return auctions.findPendingApproval().stream()
+                    .map(a -> toView(a, now, true))
+                    .toList();
+        });
+    }
+
+    @Override
+    public CompletableFuture<AuctionView> approveAuction(UserPrincipal admin, long auctionId) {
+        return executor.submit(() -> {
+            requireAdmin(admin);
+            long now = clock.millis();
+            Auction current = load(auctionId);
+            if (current.status() != AuctionStatus.PENDING_APPROVAL) {
+                throw new ServiceException(ErrorCode.AUCTION_NOT_PENDING, "Phiên không còn ở trạng thái chờ duyệt");
+            }
+            if (current.startsAt() <= now) {
+                throw validation("Giờ bắt đầu đã qua, hãy từ chối hoặc yêu cầu người đăng gửi lại");
+            }
+            Auction approved = current.withApproved(admin.userId(), now);
+            transactions.inTransaction(() -> {
+                auctions.update(approved);
+                return null;
+            });
+            log.info("{} duyệt phiên #{} \"{}\"", admin.username(), approved.id(), approved.title());
+            return toView(approved, now, true);
+        });
+    }
+
+    @Override
+    public CompletableFuture<AuctionView> rejectAuction(UserPrincipal admin, long auctionId, String reason) {
+        return executor.submit(() -> {
+            requireAdmin(admin);
+            String cleanReason = reason == null ? "" : reason.strip();
+            if (cleanReason.isEmpty()) {
+                throw validation("Vui lòng nhập lý do từ chối");
+            }
+            if (cleanReason.length() > MAX_REJECT_REASON_LENGTH) {
+                throw validation("Lý do từ chối tối đa " + MAX_REJECT_REASON_LENGTH + " ký tự");
+            }
+            long now = clock.millis();
+            Auction current = load(auctionId);
+            if (current.status() != AuctionStatus.PENDING_APPROVAL) {
+                throw new ServiceException(ErrorCode.AUCTION_NOT_PENDING, "Phiên không còn ở trạng thái chờ duyệt");
+            }
+            Auction rejected = current.withRejected(cleanReason, admin.userId(), now);
+            transactions.inTransaction(() -> {
+                auctions.update(rejected);
+                return null;
+            });
+            log.info("{} từ chối phiên #{} \"{}\"", admin.username(), rejected.id(), rejected.title());
+            return toView(rejected, now, true);
         });
     }
 
@@ -316,7 +435,7 @@ public final class AuctionServiceImpl implements AuctionService {
                 if (now >= auction.startsAt()) {
                     advance(auction, now);
                 } else if (auction.startsAt() - now <= settings.announceLeadMillis() && announced.add(auction.id())) {
-                    AuctionView view = toView(auction, now);
+                    AuctionView view = toView(auction, now, false);
                     notifyListener(l -> l.auctionStartingSoon(view), "auctionStartingSoon");
                 }
             }
@@ -353,7 +472,7 @@ public final class AuctionServiceImpl implements AuctionService {
         });
         announced.remove(auction.id());
         log.info("Mở phiên #{} \"{}\"", started.id(), started.title());
-        rooms.broadcast(started.id(), Message.event(MessageType.AUCTION_STARTED, toView(started, now)));
+        rooms.broadcast(started.id(), Message.event(MessageType.AUCTION_STARTED, toView(started, now, false)));
         return started;
     }
 
@@ -364,7 +483,7 @@ public final class AuctionServiceImpl implements AuctionService {
             settlementQueue.enqueue(finished.id()); // cùng transaction: chốt phiên ⇔ có việc lập biên bản
             return null;
         });
-        AuctionView view = toView(finished, now);
+        AuctionView view = toView(finished, now, false);
         log.info("Chốt phiên #{} \"{}\": {}", finished.id(), finished.title(), finished.winnerId() == null
                 ? "chưa có người thắng" : view.winnerDisplayName() + " thắng với " + money(finished.currentPrice()));
         rooms.broadcast(finished.id(), Message.event(MessageType.AUCTION_FINISHED, view));
@@ -373,8 +492,41 @@ public final class AuctionServiceImpl implements AuctionService {
     }
 
     private Auction load(long auctionId) {
-        return auctions.findById(auctionId).orElseThrow(() ->
-                new ServiceException(ErrorCode.AUCTION_NOT_FOUND, "Không tìm thấy phiên #" + auctionId));
+        return auctions.findById(auctionId).orElseThrow(() -> notFound(auctionId));
+    }
+
+    /**
+     * Trả phiên nếu người xem được phép biết phiên tồn tại.
+     * Phiên {@code PENDING_APPROVAL} / {@code REJECTED} bị ẩn như chưa từng tồn tại với người lạ (404).
+     */
+    private Auction loadVisible(UserPrincipal viewer, long auctionId) {
+        Auction auction = load(auctionId);
+        if (!isPublicStatus(auction.status()) && !canSeePrivateFields(viewer, auction)) {
+            throw notFound(auctionId);
+        }
+        return auction;
+    }
+
+    private static boolean canSeePrivateFields(UserPrincipal viewer, Auction auction) {
+        return viewer != null && (viewer.isAdmin() || viewer.userId() == auction.createdBy());
+    }
+
+    private static boolean isPublicStatus(AuctionStatus status) {
+        return status == AuctionStatus.SCHEDULED
+                || status == AuctionStatus.ACTIVE
+                || status == AuctionStatus.FINISHED;
+    }
+
+    private static ServiceException notFound(long auctionId) {
+        return new ServiceException(ErrorCode.AUCTION_NOT_FOUND, "Không tìm thấy phiên #" + auctionId);
+    }
+
+    private void checkUserLeadTime(long startsAt, long now) {
+        long minLead = settings.minLeadTimeForUserSubmissionMillis();
+        if (startsAt < now + minLead) {
+            long minutes = Math.max(1L, minLead / 60_000L);
+            throw validation("Giờ bắt đầu phải sau hiện tại ít nhất " + minutes + " phút để chờ duyệt");
+        }
     }
 
     private static long minimumNextBid(Auction auction) {
@@ -452,10 +604,15 @@ public final class AuctionServiceImpl implements AuctionService {
         }
     }
 
-    private AuctionView toView(Auction a, long now) {
+    private AuctionView toView(Auction a, long now, boolean includePrivateFields) {
+        User owner = users.findById(a.createdBy()).orElse(null);
+        String ownerDisplayName = owner != null ? owner.displayName() : "(tài khoản #" + a.createdBy() + ")";
+        Role ownerRole = owner != null ? owner.role() : Role.USER;
+        String rejectReason = includePrivateFields && a.status() == AuctionStatus.REJECTED ? a.rejectReason() : null;
         return new AuctionView(a.id(), a.title(), a.description(), a.status(), a.startingPrice(), a.minIncrement(),
                 a.currentPrice(), a.hasBids(), displayName(a.currentBidderId()), displayName(a.winnerId()),
-                a.startsAt(), a.endsAt(), a.extensionCount(), a.version(), now);
+                a.startsAt(), a.endsAt(), a.extensionCount(), a.version(), now,
+                a.createdBy(), ownerDisplayName, ownerRole, rejectReason);
     }
 
     private BidView toView(Bid b) {

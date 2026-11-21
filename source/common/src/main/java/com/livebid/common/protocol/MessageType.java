@@ -24,6 +24,10 @@ public enum MessageType {
     GET_MY_AUCTIONS(false),
     CREATE_AUCTION(false),
     UPDATE_AUCTION(false),
+    CANCEL_AUCTION(false),
+    GET_PENDING_AUCTIONS(false),
+    APPROVE_AUCTION(false),
+    REJECT_AUCTION(false),
 
     // ---- Sự kiện (server đẩy) ----
     AUCTION_STARTED(true),

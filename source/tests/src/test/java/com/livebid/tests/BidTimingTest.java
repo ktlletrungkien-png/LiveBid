@@ -97,7 +97,7 @@ class BidTimingTest {
         clock.set(ENDS_AT + 10_000); // sau endsAt: vẫn từ chối
         assertEquals(ErrorCode.AUCTION_FINISHED, rejection(bid(alice, aliceChannel, 1_000_000)));
 
-        AuctionView result = service.getAuction(auctionId).join();
+        AuctionView result = service.getAuction(alice, auctionId).join();
         assertEquals(AuctionStatus.FINISHED, result.status());
         assertEquals(220_000, result.currentPrice(), "bid bị từ chối không làm đổi giá");
         assertEquals("Người bob", result.winnerDisplayName(), "người thắng là bid hợp lệ cuối cùng");

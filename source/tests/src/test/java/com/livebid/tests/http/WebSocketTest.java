@@ -238,7 +238,7 @@ class WebSocketTest {
         long now = System.currentTimeMillis();
         var draft = new com.livebid.common.dto.AuctionDraft("Bàn phím cơ", "", 200_000, 20_000,
                 now - 1_000, now + 300_000);
-        AuctionView created = service.createAuction(new UserPrincipal(1, "admin", "Quản trị", Role.ADMIN), draft)
+        AuctionView created = service.createAuction(new UserPrincipal(999, "admin", "Quản trị", Role.ADMIN), draft)
                 .get(WAIT_SECONDS, TimeUnit.SECONDS);
         service.processDueAuctions().get(WAIT_SECONDS, TimeUnit.SECONDS);
         return created.auctionId();

@@ -32,8 +32,11 @@ public interface AuctionService {
     /** {@code status} null = tất cả. {@code page} từ 1; {@code pageSize} 1–50. */
     CompletableFuture<PageResult<AuctionView>> listAuctions(AuctionStatus status, int page, int pageSize);
 
-    /** Lỗi: AUCTION_NOT_FOUND. */
-    CompletableFuture<AuctionView> getAuction(long auctionId);
+    /**
+     * Xem chi tiết phiên. Phiên {@code PENDING_APPROVAL} hoặc {@code REJECTED} chỉ chủ phiên và ADMIN
+     * xem được; người khác nhận {@code AUCTION_NOT_FOUND}.
+     */
+    CompletableFuture<AuctionView> getAuction(UserPrincipal viewer, long auctionId);
 
     /** Mới nhất đứng đầu; {@code beforeBidId} null = trang đầu; {@code limit} 1–50. */
     CompletableFuture<List<BidView>> getBidHistory(long auctionId, Long beforeBidId, int limit);
@@ -42,7 +45,10 @@ public interface AuctionService {
 
     // ---------------------------------------------------------------- phòng đấu giá
 
-    /** Vào phòng, nhận snapshot đầy đủ; từ đây kênh nhận sự kiện của phiên. Lỗi: AUCTION_NOT_FOUND. */
+    /**
+     * Vào phòng, nhận snapshot đầy đủ; từ đây kênh nhận sự kiện của phiên.
+     * Phiên chưa duyệt chỉ trả {@code AUCTION_NOT_FOUND} với người lạ, không cho vào phòng kể cả chủ phiên.
+     */
     CompletableFuture<RoomSnapshot> joinAuction(UserPrincipal user, ClientChannel channel, long auctionId);
 
     CompletableFuture<Void> leaveAuction(ClientChannel channel, long auctionId);
@@ -54,18 +60,36 @@ public interface AuctionService {
      * Đặt giá. Người đặt lấy từ {@code user} (phiên đăng nhập), không lấy từ payload.
      * Gửi lại cùng {@code requestId} thì trả biên nhận cũ, không tạo bid mới.
      *
-     * <p>Lỗi: FORBIDDEN (ADMIN), AUCTION_NOT_FOUND, NOT_IN_ROOM, AUCTION_NOT_STARTED, AUCTION_FINISHED,
-     * VALIDATION_ERROR (giá ≤ 0 hoặc quá giới hạn), BID_TOO_LOW.
+     * <p>Lỗi: FORBIDDEN (ADMIN), OWN_AUCTION (chủ phiên), AUCTION_NOT_FOUND, NOT_IN_ROOM,
+     * AUCTION_NOT_STARTED, AUCTION_FINISHED, VALIDATION_ERROR (giá ≤ 0 hoặc quá giới hạn), BID_TOO_LOW.
      */
     CompletableFuture<BidReceipt> placeBid(UserPrincipal user, ClientChannel channel,
                                            long auctionId, long amount, String requestId);
 
-    // ---------------------------------------------------------------- quản trị (ADMIN)
+    // ---------------------------------------------------------------- tạo, sửa, hủy & kiểm duyệt
 
-    /** Lỗi: FORBIDDEN, VALIDATION_ERROR. */
-    CompletableFuture<AuctionView> createAuction(UserPrincipal admin, AuctionDraft draft);
+    /**
+     * Tạo phiên mới. {@code ADMIN} vào thẳng {@code SCHEDULED}; {@code USER} vào {@code PENDING_APPROVAL}
+     * (yêu cầu {@code startsAt} đủ xa và không quá giới hạn phiên chờ duyệt).
+     */
+    CompletableFuture<AuctionView> createAuction(UserPrincipal user, AuctionDraft draft);
 
-    /** Chỉ khi phiên còn SCHEDULED. Lỗi: FORBIDDEN, AUCTION_NOT_FOUND, VALIDATION_ERROR, VERSION_CONFLICT. */
-    CompletableFuture<AuctionView> updateAuction(UserPrincipal admin, long auctionId,
+    /**
+     * Sửa phiên: {@code USER} chỉ sửa phiên của mình đang {@code PENDING_APPROVAL};
+     * {@code ADMIN} chỉ sửa phiên đang {@code SCHEDULED}.
+     */
+    CompletableFuture<AuctionView> updateAuction(UserPrincipal user, long auctionId,
                                                  long expectedVersion, AuctionDraft draft);
+
+    /** Chủ phiên hủy (xóa) phiên của mình khi còn {@code PENDING_APPROVAL}. */
+    CompletableFuture<Void> cancelAuction(UserPrincipal user, long auctionId);
+
+    /** ADMIN lấy danh sách phiên đang chờ duyệt, cũ nhất đứng đầu. */
+    CompletableFuture<List<AuctionView>> getPendingAuctions(UserPrincipal admin);
+
+    /** ADMIN duyệt phiên {@code PENDING_APPROVAL} → {@code SCHEDULED}. */
+    CompletableFuture<AuctionView> approveAuction(UserPrincipal admin, long auctionId);
+
+    /** ADMIN từ chối phiên {@code PENDING_APPROVAL} → {@code REJECTED} kèm lý do (1–500 ký tự). */
+    CompletableFuture<AuctionView> rejectAuction(UserPrincipal admin, long auctionId, String reason);
 }

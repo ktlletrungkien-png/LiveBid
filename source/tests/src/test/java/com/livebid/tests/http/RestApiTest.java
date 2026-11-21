@@ -143,7 +143,7 @@ class RestApiTest {
     // ---- Phiên đấu giá ----
 
     @Test
-    void adminCreatesAuctionAndUserCannot() throws Exception {
+    void adminCreatesScheduledAndUserCreatesPendingWithLeadTime() throws Exception {
         String admin = adminToken();
         String user = userToken("nguoi_dung");
 
@@ -152,9 +152,66 @@ class RestApiTest {
         assertEquals("Bàn phím cơ", created.json().get("title").getAsString());
         assertEquals("SCHEDULED", created.json().get("status").getAsString());
 
-        Resp forbidden = call("POST", "/api/auctions", user, draft("Không được"));
-        assertEquals(403, forbidden.status());
-        assertEquals("FORBIDDEN", errorCode(forbidden));
+        Resp tooSoon = call("POST", "/api/auctions", user, draft("Quá gấp"));
+        assertEquals(400, tooSoon.status());
+        assertEquals("VALIDATION_ERROR", errorCode(tooSoon));
+
+        Resp userCreated = call("POST", "/api/auctions", user, userDraft("User đăng hợp lệ"));
+        assertEquals(201, userCreated.status());
+        assertEquals("PENDING_APPROVAL", userCreated.json().get("status").getAsString());
+    }
+
+    @Test
+    void userApprovalWorkflowOverRest() throws Exception {
+        String admin = adminToken();
+        String owner = userToken("chu_phien");
+        String stranger = userToken("nguoi_la");
+
+        // User đăng phiên -> PENDING_APPROVAL
+        JsonObject created = call("POST", "/api/auctions", owner, userDraft("Đồng hồ cổ")).json();
+        long id = created.get("auctionId").getAsLong();
+        long version = created.get("version").getAsLong();
+        assertEquals("PENDING_APPROVAL", created.get("status").getAsString());
+
+        // Không lộ trong danh sách công khai; người lạ xem chi tiết -> 404
+        assertEquals(0, call("GET", "/api/auctions", stranger, null).json().getAsJsonArray("items").size());
+        assertEquals(404, call("GET", "/api/auctions/" + id, stranger, null).status());
+        assertEquals(200, call("GET", "/api/auctions/" + id, owner, null).status());
+
+        // User không được xem hàng chờ duyệt
+        assertEquals(403, call("GET", "/api/auctions/pending", owner, null).status());
+        assertEquals(1, call("GET", "/api/auctions/pending", admin, null).status() == 200 ? 1 : 0);
+
+        // Chủ phiên sửa khi đang chờ duyệt
+        Resp updated = call("PUT", "/api/auctions/" + id, owner,
+                Map.of("expectedVersion", version, "draft", userDraft("Đồng hồ cổ sửa")));
+        assertEquals(200, updated.status());
+        assertEquals("Đồng hồ cổ sửa", updated.json().get("title").getAsString());
+
+        // ADMIN duyệt -> SCHEDULED, lộ ở danh sách công khai
+        Resp approved = call("POST", "/api/auctions/" + id + "/approve", admin, null);
+        assertEquals(200, approved.status());
+        assertEquals("SCHEDULED", approved.json().get("status").getAsString());
+        assertEquals(1, call("GET", "/api/auctions", stranger, null).json().getAsJsonArray("items").size());
+
+        // Duyệt lại phiên đã duyệt -> 409 AUCTION_NOT_PENDING
+        Resp approveAgain = call("POST", "/api/auctions/" + id + "/approve", admin, null);
+        assertEquals(409, approveAgain.status());
+        assertEquals("AUCTION_NOT_PENDING", errorCode(approveAgain));
+
+        // User đăng phiên thứ 2 -> ADMIN từ chối; đăng phiên thứ 3 -> tự hủy (204)
+        long id2 = call("POST", "/api/auctions", owner, userDraft("Phiên từ chối")).json()
+                .get("auctionId").getAsLong();
+        Resp rejected = call("POST", "/api/auctions/" + id2 + "/reject", admin, Map.of("reason", "Thiếu mô tả"));
+        assertEquals(200, rejected.status());
+        assertEquals("REJECTED", rejected.json().get("status").getAsString());
+        assertEquals("Thiếu mô tả", rejected.json().get("rejectReason").getAsString());
+
+        long id3 = call("POST", "/api/auctions", owner, userDraft("Phiên tự hủy")).json()
+                .get("auctionId").getAsLong();
+        assertEquals(204, call("DELETE", "/api/auctions/" + id3, owner, null).status());
+        assertEquals(404, call("GET", "/api/auctions/" + id3, owner, null).status());
+        assertEquals(200, call("GET", "/api/me/auctions?filter=created", owner, null).status());
     }
 
     @Test
@@ -307,6 +364,12 @@ class RestApiTest {
         long now = System.currentTimeMillis();
         return Map.of("title", title, "description", "Mô tả", "startingPrice", 200_000L,
                 "minIncrement", 20_000L, "startsAt", now + 600_000L, "endsAt", now + 900_000L);
+    }
+
+    private static Map<String, Object> userDraft(String title) {
+        long now = System.currentTimeMillis();
+        return Map.of("title", title, "description", "Mô tả", "startingPrice", 200_000L,
+                "minIncrement", 20_000L, "startsAt", now + 2_400_000L, "endsAt", now + 3_600_000L);
     }
 
     private static String errorCode(Resp r) {

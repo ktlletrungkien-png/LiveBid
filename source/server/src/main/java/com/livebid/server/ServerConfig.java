@@ -171,6 +171,8 @@ public final class ServerConfig {
                 getInt("auction.antiSnipingExtensionSeconds", (int) (d.antiSnipingExtensionMillis() / 1000)) * 1000L,
                 getInt("auction.antiSnipingMaxExtensions", d.maxExtensions()),
                 getInt("auction.announceLeadSeconds", (int) (d.announceLeadMillis() / 1000)) * 1000L,
-                getInt("auction.snapshotBidCount", d.snapshotBidCount()));
+                getInt("auction.snapshotBidCount", d.snapshotBidCount()),
+                getInt("auction.userSubmitMinLeadSeconds",
+                        (int) (d.minLeadTimeForUserSubmissionMillis() / 1000)) * 1000L);
     }
 }

@@ -24,8 +24,10 @@ public final class SqliteAuctionRepository implements AuctionRepository {
 
     private static final String COLUMNS = "id, title, description, starting_price, min_increment, current_price, "
             + "current_bidder_id, winner_id, starts_at, ends_at, extension_count, status, version, created_by, "
-            + "created_at";
+            + "created_at, reject_reason, reviewed_by, reviewed_at";
     private static final String ORDER = " ORDER BY starts_at, id";
+    private static final String PENDING_ORDER = " ORDER BY created_at, id";
+    private static final String CREATED_ORDER = " ORDER BY created_at DESC, id DESC";
 
     private final SqliteDatabase db;
 
@@ -49,8 +51,47 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     }
 
     @Override
+    public List<Auction> findPublicPage(AuctionStatus status, int offset, int limit) {
+        if (status == AuctionStatus.PENDING_APPROVAL || status == AuctionStatus.REJECTED) {
+            return List.of();
+        }
+        if (status == null) {
+            return query("SELECT " + COLUMNS + " FROM auctions WHERE status IN ('SCHEDULED', 'ACTIVE', 'FINISHED')"
+                    + ORDER + " LIMIT ? OFFSET ?", limit, offset);
+        }
+        return query("SELECT " + COLUMNS + " FROM auctions WHERE status = ?" + ORDER + " LIMIT ? OFFSET ?",
+                status.name(), limit, offset);
+    }
+
+    @Override
     public List<Auction> findByStatus(AuctionStatus status) {
         return query("SELECT " + COLUMNS + " FROM auctions WHERE status = ?" + ORDER, status.name());
+    }
+
+    @Override
+    public List<Auction> findPendingApproval() {
+        return query("SELECT " + COLUMNS + " FROM auctions WHERE status = ?" + PENDING_ORDER,
+                AuctionStatus.PENDING_APPROVAL.name());
+    }
+
+    @Override
+    public List<Auction> findCreatedBy(long userId) {
+        return query("SELECT " + COLUMNS + " FROM auctions WHERE created_by = ?" + CREATED_ORDER, userId);
+    }
+
+    @Override
+    public int countPendingBy(long userId) {
+        String sql = "SELECT COUNT(*) FROM auctions WHERE created_by = ? AND status = ?";
+        try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setString(2, AuctionStatus.PENDING_APPROVAL.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw new DataAccessException("Lỗi đếm phiên chờ duyệt", e);
+        }
     }
 
     @Override
@@ -68,7 +109,8 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     public Auction insert(NewAuction n) {
         String sql = "INSERT INTO auctions (title, description, starting_price, min_increment, current_price, "
                 + "current_bidder_id, winner_id, starts_at, ends_at, extension_count, status, version, "
-                + "created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, 0, ?, 1, ?, ?)";
+                + "created_by, created_at, reject_reason, reviewed_by, reviewed_at) "
+                + "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, 0, ?, 1, ?, ?, NULL, NULL, NULL)";
         try (PreparedStatement ps = db.connection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, n.title());
             ps.setString(2, n.description());
@@ -77,7 +119,7 @@ public final class SqliteAuctionRepository implements AuctionRepository {
             ps.setLong(5, n.startingPrice());
             ps.setLong(6, n.startsAt());
             ps.setLong(7, n.endsAt());
-            ps.setString(8, AuctionStatus.SCHEDULED.name());
+            ps.setString(8, n.initialStatus().name());
             ps.setLong(9, n.createdBy());
             ps.setLong(10, n.createdAt());
             ps.executeUpdate();
@@ -85,7 +127,7 @@ public final class SqliteAuctionRepository implements AuctionRepository {
                 keys.next();
                 return new Auction(keys.getLong(1), n.title(), n.description(), n.startingPrice(),
                         n.minIncrement(), n.startingPrice(), null, null, n.startsAt(), n.endsAt(), 0,
-                        AuctionStatus.SCHEDULED, 1, n.createdBy(), n.createdAt());
+                        n.initialStatus(), 1, n.createdBy(), n.createdAt(), null, null, null);
             }
         } catch (SQLException e) {
             throw new DataAccessException("Không thêm được phiên đấu giá", e);
@@ -96,7 +138,8 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     public void update(Auction a) {
         String sql = "UPDATE auctions SET title = ?, description = ?, starting_price = ?, min_increment = ?, "
                 + "current_price = ?, current_bidder_id = ?, winner_id = ?, starts_at = ?, ends_at = ?, "
-                + "extension_count = ?, status = ?, version = ?, created_by = ?, created_at = ? WHERE id = ?";
+                + "extension_count = ?, status = ?, version = ?, created_by = ?, created_at = ?, "
+                + "reject_reason = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?";
         try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
             ps.setString(1, a.title());
             ps.setString(2, a.description());
@@ -112,12 +155,31 @@ public final class SqliteAuctionRepository implements AuctionRepository {
             ps.setLong(12, a.version());
             ps.setLong(13, a.createdBy());
             ps.setLong(14, a.createdAt());
-            ps.setLong(15, a.id());
+            if (a.rejectReason() == null) {
+                ps.setNull(15, java.sql.Types.VARCHAR);
+            } else {
+                ps.setString(15, a.rejectReason());
+            }
+            setNullableLong(ps, 16, a.reviewedBy());
+            setNullableLong(ps, 17, a.reviewedAt());
+            ps.setLong(18, a.id());
             if (ps.executeUpdate() == 0) {
                 throw new DataAccessException("Không có phiên " + a.id(), null);
             }
         } catch (SQLException e) {
             throw new DataAccessException("Không cập nhật được phiên " + a.id(), e);
+        }
+    }
+
+    @Override
+    public boolean deleteIfPending(long auctionId) {
+        String sql = "DELETE FROM auctions WHERE id = ? AND status = ?";
+        try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
+            ps.setLong(1, auctionId);
+            ps.setString(2, AuctionStatus.PENDING_APPROVAL.name());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new DataAccessException("Không hủy được phiên " + auctionId, e);
         }
     }
 
@@ -147,10 +209,10 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     }
 
     private static Auction map(ResultSet rs) throws SQLException {
-        long bidder = rs.getLong("current_bidder_id");
-        Long currentBidderId = rs.wasNull() ? null : bidder;
-        long winner = rs.getLong("winner_id");
-        Long winnerId = rs.wasNull() ? null : winner;
+        Long currentBidderId = nullableLong(rs, "current_bidder_id");
+        Long winnerId = nullableLong(rs, "winner_id");
+        Long reviewedBy = nullableLong(rs, "reviewed_by");
+        Long reviewedAt = nullableLong(rs, "reviewed_at");
         return new Auction(
                 rs.getLong("id"),
                 rs.getString("title"),
@@ -166,6 +228,14 @@ public final class SqliteAuctionRepository implements AuctionRepository {
                 AuctionStatus.valueOf(rs.getString("status")),
                 rs.getLong("version"),
                 rs.getLong("created_by"),
-                rs.getLong("created_at"));
+                rs.getLong("created_at"),
+                rs.getString("reject_reason"),
+                reviewedBy,
+                reviewedAt);
+    }
+
+    private static Long nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
     }
 }
