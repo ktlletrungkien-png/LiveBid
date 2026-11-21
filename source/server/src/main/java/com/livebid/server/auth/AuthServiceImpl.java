@@ -102,6 +102,33 @@ public final class AuthServiceImpl implements AuthService, AutoCloseable {
     }
 
     @Override
+    public CompletableFuture<UserPrincipal> updateProfile(UserPrincipal user, String displayName,
+                                                          String currentPassword, String newPassword) {
+        boolean changePassword = newPassword != null && !newPassword.isEmpty();
+        String problem = displayNameError(displayName);
+        if (problem == null && changePassword) {
+            problem = passwordError(newPassword);
+        }
+        if (problem != null) {
+            return failed(new ServiceException(ErrorCode.VALIDATION_ERROR, problem));
+        }
+        String display = displayName.trim();
+
+        // 1. Đọc tài khoản hiện tại (executor) → 2. kiểm tra mật khẩu cũ và băm mật khẩu mới (pool băm)
+        // → 3. ghi CSDL (executor) → 4. cập nhật các token đang cấp cho người này.
+        return executor.submit(() -> users.findById(user.userId())
+                        .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHORIZED, "Tài khoản không còn tồn tại")))
+                .thenComposeAsync(stored -> changePassword
+                        ? rehashAsync(stored, currentPassword, newPassword)
+                        : CompletableFuture.completedFuture((HashedPassword) null), hashPool)
+                .thenComposeAsync(hashed -> executor.submit(() -> saveProfile(user.userId(), display, hashed)), hashPool)
+                .thenApply(updated -> {
+                    tokens.replaceAll((token, principal) -> principal.userId() == updated.userId() ? updated : principal);
+                    return updated;
+                });
+    }
+
+    @Override
     public String issueToken(UserPrincipal user) {
         byte[] bytes = new byte[TOKEN_BYTES];
         random.nextBytes(bytes);
@@ -146,6 +173,41 @@ public final class AuthServiceImpl implements AuthService, AutoCloseable {
             log.error("Không ghi được người dùng {} vào CSDL", name, e);
             throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Lỗi cơ sở dữ liệu, thử lại sau");
         }
+    }
+
+    /** Chạy trên luồng executor: ghi tên mới và (nếu có) mật khẩu mới; đọc lại để không ghi đè dữ liệu cũ. */
+    private UserPrincipal saveProfile(long userId, String display, HashedPassword hashed) {
+        User current = users.findById(userId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHORIZED, "Tài khoản không còn tồn tại"));
+        User updated = hashed == null
+                ? new User(current.id(), current.username(), display, current.passwordHash(), current.passwordSalt(),
+                        current.passwordIterations(), current.role(), current.createdAt())
+                : new User(current.id(), current.username(), display, hashed.hash(), hashed.salt(),
+                        hashed.iterations(), current.role(), current.createdAt());
+        try {
+            users.update(updated);
+        } catch (DataAccessException e) {
+            log.error("Không cập nhật được thông tin người dùng {}", userId, e);
+            throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Lỗi cơ sở dữ liệu, thử lại sau");
+        }
+        return new UserPrincipal(updated.id(), updated.username(), updated.displayName(), updated.role());
+    }
+
+    /** Chạy trên pool băm: kiểm tra mật khẩu hiện tại rồi băm mật khẩu mới với salt mới. */
+    private CompletableFuture<HashedPassword> rehashAsync(User stored, String currentPassword, String newPassword) {
+        return CompletableFuture.supplyAsync(() -> {
+            char[] current = currentPassword == null ? new char[0] : currentPassword.toCharArray();
+            char[] fresh = newPassword.toCharArray();
+            try {
+                if (!hasher.verify(current, stored.passwordHash(), stored.passwordSalt(), stored.passwordIterations())) {
+                    throw new ServiceException(ErrorCode.INVALID_CREDENTIALS, "Mật khẩu hiện tại không đúng");
+                }
+                return hasher.hash(fresh);
+            } finally {
+                Arrays.fill(current, '\0');
+                Arrays.fill(fresh, '\0');
+            }
+        }, hashPool);
     }
 
     /** Chạy trên pool băm: băm mật khẩu với salt mới. */
@@ -195,9 +257,18 @@ public final class AuthServiceImpl implements AuthService, AutoCloseable {
         if (username == null || !USERNAME.matcher(username).matches()) {
             return "Tên đăng nhập phải từ 3 đến 30 ký tự, chỉ gồm chữ không dấu, chữ số và dấu gạch dưới";
         }
+        String problem = passwordError(password);
+        return problem != null ? problem : displayNameError(displayName);
+    }
+
+    private static String passwordError(String password) {
         if (password == null || password.length() < MIN_PASSWORD || password.length() > MAX_PASSWORD) {
             return "Mật khẩu phải có từ 8 đến 128 ký tự";
         }
+        return null;
+    }
+
+    private static String displayNameError(String displayName) {
         String display = displayName == null ? "" : displayName.trim();
         if (display.isEmpty() || display.length() > MAX_DISPLAY_NAME || containsControlChar(display)) {
             return "Tên hiển thị phải từ 1 đến 50 ký tự và không chứa ký tự điều khiển";

@@ -82,6 +82,7 @@ final class AuctionFormDialog extends JDialog {
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         JButton cancelButton = new JButton("Huỷ");
         JButton saveButton = new JButton("Lưu");
+        UiTheme.primary(saveButton);
         buttons.add(cancelButton);
         buttons.add(saveButton);
         footer.add(buttons, BorderLayout.EAST);

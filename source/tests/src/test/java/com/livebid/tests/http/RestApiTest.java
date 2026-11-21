@@ -130,6 +130,30 @@ class RestApiTest {
         assertEquals(401, call("GET", "/api/me", token, null).status());
     }
 
+    @Test
+    void updateProfileViaRest() throws Exception {
+        String token = register("hoe_01", "matkhau123", "Hoè").json().get("token").getAsString();
+
+        Resp updated = call("PUT", "/api/me", token, Map.of("displayName", "Cao Công Hoè"));
+        assertEquals(200, updated.status());
+        assertEquals("Cao Công Hoè", updated.json().get("displayName").getAsString());
+        assertEquals("Cao Công Hoè", call("GET", "/api/me", token, null).json().get("displayName").getAsString(),
+                "token cũ vẫn dùng được và mang tên mới");
+
+        Resp wrong = call("PUT", "/api/me", token,
+                Map.of("displayName", "Hoè", "currentPassword", "saimatkhau", "newPassword", "matkhaumoi1"));
+        assertEquals(401, wrong.status());
+        assertEquals("INVALID_CREDENTIALS", errorCode(wrong));
+
+        Resp changed = call("PUT", "/api/me", token,
+                Map.of("displayName", "Hoè", "currentPassword", "matkhau123", "newPassword", "matkhaumoi1"));
+        assertEquals(200, changed.status());
+        assertEquals(200, call("POST", "/api/login", null,
+                Map.of("username", "hoe_01", "password", "matkhaumoi1")).status(), "đăng nhập bằng mật khẩu mới");
+
+        assertEquals(401, call("PUT", "/api/me", null, Map.of("displayName", "X")).status(), "thiếu token");
+    }
+
     // ---- Xác thực ----
 
     @Test

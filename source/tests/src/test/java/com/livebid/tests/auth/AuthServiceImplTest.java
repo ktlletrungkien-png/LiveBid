@@ -119,6 +119,46 @@ class AuthServiceImplTest {
         assertEquals(Optional.empty(), auth.resolveToken(null));
     }
 
+    // ---- Cập nhật thông tin ----
+
+    @Test
+    void updateDisplayNameKeepsPasswordAndRefreshesTokens() throws Exception {
+        UserPrincipal p = await(auth.register("hoe_01", "matkhau123", "Hoè"));
+        String token = auth.issueToken(p);
+
+        UserPrincipal updated = await(auth.updateProfile(p, "  Cao Công Hoè  ", null, null));
+
+        assertEquals("Cao Công Hoè", updated.displayName());
+        assertEquals("hoe_01", updated.username());
+        assertEquals("Cao Công Hoè", auth.resolveToken(token).orElseThrow().displayName(), "token mang tên mới");
+        assertEquals("Cao Công Hoè", users.findByUsername("hoe_01").orElseThrow().displayName());
+        assertEquals("hoe_01", await(auth.login("hoe_01", "matkhau123")).username(), "mật khẩu cũ vẫn dùng được");
+    }
+
+    @Test
+    void changePasswordRequiresCorrectCurrentPassword() throws Exception {
+        UserPrincipal p = await(auth.register("hoe_01", "matkhau123", "Hoè"));
+
+        ServiceException wrong = failureOf(auth.updateProfile(p, "Hoè", "saimatkhau", "matkhaumoi1"));
+        assertEquals(ErrorCode.INVALID_CREDENTIALS, wrong.code());
+        assertEquals("hoe_01", await(auth.login("hoe_01", "matkhau123")).username(), "sai mật khẩu cũ thì không đổi gì");
+
+        await(auth.updateProfile(p, "Hoè", "matkhau123", "matkhaumoi1"));
+        assertEquals("hoe_01", await(auth.login("hoe_01", "matkhaumoi1")).username(), "đăng nhập bằng mật khẩu mới");
+        assertEquals(ErrorCode.INVALID_CREDENTIALS, failureOf(auth.login("hoe_01", "matkhau123")).code(),
+                "mật khẩu cũ hết hiệu lực");
+    }
+
+    @Test
+    void invalidProfileDataIsValidationError() throws Exception {
+        UserPrincipal p = await(auth.register("hoe_01", "matkhau123", "Hoè"));
+
+        assertEquals(ErrorCode.VALIDATION_ERROR, failureOf(auth.updateProfile(p, "   ", null, null)).code(),
+                "tên hiển thị rỗng");
+        assertEquals(ErrorCode.VALIDATION_ERROR, failureOf(auth.updateProfile(p, "Hoè", "matkhau123", "ngan")).code(),
+                "mật khẩu mới quá ngắn");
+    }
+
     // ---- Tiện ích ----
 
     private static <T> T await(CompletableFuture<T> future) throws Exception {

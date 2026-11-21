@@ -20,7 +20,6 @@ import com.livebid.common.protocol.ProtocolException;
 import com.livebid.common.udp.AuctionAnnouncement;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
@@ -37,7 +36,9 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -85,6 +86,12 @@ public final class MainFrame extends JFrame {
     private final JLabel noticeLabel = new JLabel();
     private final JLabel userLabel = new JLabel();
     private final JButton reconnectButton = new JButton("Kết nối lại");
+    /** Ảnh đại diện + tên ở góc phải thanh trên cùng; bấm vào mở menu tài khoản (giống trang web). */
+    private final JButton accountButton = new JButton();
+    private final JPopupMenu accountMenu = new JPopupMenu();
+    private final JLabel accountAvatar = new JLabel();
+    private final JLabel accountName = new JLabel();
+    private final JLabel accountUsername = new JLabel();
     private final Timer noticeTimer = new Timer(NOTICE_MILLIS, e -> noticeLabel.setText(""));
     private final Timer retryTimer = new Timer(0, e -> attemptReconnect());
     private final ReconnectPolicy reconnectPolicy = new ReconnectPolicy();
@@ -137,6 +144,7 @@ public final class MainFrame extends JFrame {
         connection.addEventListener(message -> SwingUtilities.invokeLater(() -> dispatchEvent(message)));
 
         cardPanel.add(new ConnectPanel(this, config), CARD_CONNECT);
+        add(buildBrandBar(), BorderLayout.NORTH);
         add(cardPanel, BorderLayout.CENTER);
         add(buildStatusBar(), BorderLayout.SOUTH);
         showConnect();
@@ -175,9 +183,147 @@ public final class MainFrame extends JFrame {
         this.currentUser = user;
         rememberCredentials(username, password);
         userLabel.setText("Người dùng: " + user.displayName());
+        updateAccountMenu();
         showList();
         startMulticast();
         setStatus("Đã đăng nhập: " + user.displayName());
+    }
+
+    /** Menu tài khoản → "Đăng xuất": gửi LOGOUT, giữ kết nối TCP và quay về màn hình đăng nhập. Gọi trên EDT. */
+    private void logout() {
+        if (currentUser == null) {
+            return;
+        }
+        if (!connection.isConnected()) {
+            afterLogout(null);
+            return;
+        }
+        setStatus("Đang đăng xuất...");
+        connection.request(MessageType.LOGOUT, null)
+                .whenComplete((reply, error) -> SwingUtilities.invokeLater(() -> afterLogout(
+                        error != null ? error
+                                : reply.isSuccess() ? null
+                                : new RemoteErrorException(reply.error()))));
+    }
+
+    /**
+     * Dọn trạng thái đăng nhập trên máy dù server có trả lời hay không: quên mật khẩu đã lưu (để không tự đăng
+     * nhập lại), đóng phòng, tắt multicast. Còn kết nối thì mở lại màn hình đăng nhập trống.
+     */
+    private void afterLogout(Throwable error) {
+        retryTimer.stop();
+        reconnectPolicy.reset();
+        retryInProgress = false;
+        reconnectButton.setVisible(false);
+        clearCredentials();
+        stopMulticast();
+        closeRoom();
+        openRoomId = null;
+        if (hubPanel != null) {
+            cardPanel.remove(hubPanel);
+            hubPanel = null;
+        }
+        currentUser = null;
+        userLabel.setText("");
+        updateAccountMenu();
+        if (!connection.isConnected()) {
+            resetToConnectScreen();
+            return;
+        }
+        if (loginPanel != null) {
+            cardPanel.remove(loginPanel);
+        }
+        loginPanel = new LoginPanel(this);
+        cardPanel.add(loginPanel, CARD_LOGIN);
+        cards.show(cardPanel, CARD_LOGIN);
+        setStatus(error == null ? "Đã đăng xuất." : "Đã đăng xuất trên máy này (server báo: " + describeError(error) + ")");
+    }
+
+    /** Menu tài khoản → "Cập nhật thông tin": mở hộp thoại, lưu xong thì làm mới các màn hình. Gọi trên EDT. */
+    private void openProfile() {
+        if (currentUser == null) {
+            return;
+        }
+        if (!connection.isConnected()) {
+            setStatus("Chưa kết nối tới server.");
+            return;
+        }
+        Optional<ProfileDialog.Result> saved = ProfileDialog.show(this, connection, currentUser);
+        if (saved.isEmpty() || currentUser == null) {
+            return;
+        }
+        currentUser = saved.get().user();
+        if (saved.get().newPassword() != null && savedUsername != null) {
+            // Tự đăng nhập lại sau khi mất kết nối phải dùng mật khẩu mới.
+            rememberCredentials(savedUsername, saved.get().newPassword());
+        }
+        userLabel.setText("Người dùng: " + currentUser.displayName());
+        updateAccountMenu();
+        setStatus("Đã cập nhật thông tin: " + currentUser.displayName());
+        // Danh sách và phòng đang giữ thông tin cũ (tên ở chân trang, so sánh "bị vượt giá"), nên dựng lại.
+        if (hubPanel != null) {
+            cardPanel.remove(hubPanel);
+            hubPanel = null;
+        }
+        if (openRoomId != null) {
+            openRoom(openRoomId);
+        } else {
+            showList();
+        }
+    }
+
+    private JPanel buildBrandBar() {
+        JPanel bar = UiTheme.brandBar();
+        UiTheme.accountButton(accountButton);
+        accountButton.setVisible(false);
+        accountButton.setToolTipText("Tài khoản");
+        accountButton.addActionListener(e -> accountMenu.show(accountButton,
+                accountButton.getWidth() - accountMenu.getPreferredSize().width, accountButton.getHeight() + 6));
+
+        JPanel names = new JPanel(new BorderLayout(0, 2));
+        names.setOpaque(false);
+        accountName.setFont(UiTheme.sans(700, 14f));
+        accountName.putClientProperty("html.disable", Boolean.TRUE);
+        accountUsername.setForeground(UiTheme.MUTED);
+        accountUsername.putClientProperty("html.disable", Boolean.TRUE);
+        names.add(accountName, BorderLayout.NORTH);
+        names.add(accountUsername, BorderLayout.SOUTH);
+        JPanel head = new JPanel(new BorderLayout(12, 0));
+        head.setOpaque(false);
+        head.setBorder(new EmptyBorder(6, 8, 10, 16));
+        head.add(accountAvatar, BorderLayout.WEST);
+        head.add(names, BorderLayout.CENTER);
+
+        JMenuItem profileItem = new JMenuItem("Cập nhật thông tin...");
+        profileItem.addActionListener(e -> openProfile());
+        JMenuItem logoutItem = new JMenuItem("Đăng xuất");
+        logoutItem.setForeground(UiTheme.ERROR);
+        logoutItem.addActionListener(e -> logout());
+        accountMenu.add(head);
+        accountMenu.addSeparator();
+        accountMenu.add(profileItem);
+        accountMenu.add(logoutItem);
+
+        bar.add(accountButton, BorderLayout.EAST);
+        return bar;
+    }
+
+    /** Hiện/ẩn nút tài khoản theo người đang đăng nhập và cập nhật tên, ảnh đại diện. */
+    private void updateAccountMenu() {
+        UserView user = currentUser;
+        accountMenu.setVisible(false);
+        if (user == null) {
+            accountButton.setVisible(false);
+            return;
+        }
+        // Dấu ▾ chỉ thêm khi font có ký tự này (Be Vietnam Pro không có; Swing không tự lấy từ font khác).
+        String caret = accountButton.getFont().canDisplay('▾') ? "  ▾" : "";
+        accountButton.setText(user.displayName() + caret);
+        accountButton.setIcon(UiTheme.avatarIcon(user.displayName(), 30));
+        accountAvatar.setIcon(UiTheme.avatarIcon(user.displayName(), 40));
+        accountName.setText(user.displayName());
+        accountUsername.setText("@" + user.username());
+        accountButton.setVisible(true);
     }
 
     /** Quay lại danh sách phiên (sau đăng nhập hoặc khi rời phòng). Gọi trên EDT. */
@@ -444,6 +590,9 @@ public final class MainFrame extends JFrame {
         connection.call(MessageType.LOGIN, new LoginPayload(username, new String(password)), LoginResult.class)
                 .whenComplete((result, error) -> SwingUtilities.invokeLater(() -> {
                     retryInProgress = false;
+                    if (savedUsername == null) {
+                        return; // người dùng đã đăng xuất trong lúc đang đăng nhập lại
+                    }
                     if (error != null) {
                         setStatus("Không đăng nhập lại được: " + describeError(error));
                         scheduleRetry();
@@ -453,6 +602,7 @@ public final class MainFrame extends JFrame {
                     reconnectButton.setVisible(false);
                     currentUser = result.user();
                     userLabel.setText("Người dùng: " + result.user().displayName());
+                    updateAccountMenu();
                     setStatus("Đã kết nối lại: " + result.user().displayName());
                     if (openRoomId != null) {
                         openRoom(openRoomId);
@@ -483,6 +633,7 @@ public final class MainFrame extends JFrame {
             loginPanel = null;
         }
         currentUser = null;
+        updateAccountMenu();
         openRoomId = null;
         clearCredentials();
         showConnect();
@@ -505,7 +656,7 @@ public final class MainFrame extends JFrame {
     private JPanel buildStatusBar() {
         JPanel bar = new JPanel(new BorderLayout(8, 0));
         bar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, UiTheme.BORDER),
                 new EmptyBorder(6, 10, 6, 10)));
         bar.add(statusLabel, BorderLayout.WEST);
         bar.add(noticeLabel, BorderLayout.CENTER);

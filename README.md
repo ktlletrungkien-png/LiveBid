@@ -159,6 +159,7 @@ header `Authorization: Bearer <token>` (thiếu hoặc sai → `401 UNAUTHORIZED
 | POST | `/api/login` | Công khai | `{username, password}` | `200` `{user, token}` · `401 INVALID_CREDENTIALS` |
 | POST | `/api/logout` | Đăng nhập | — | `204` (thu hồi token) |
 | GET | `/api/me` | Đăng nhập | — | `200` `UserView` |
+| PUT | `/api/me` | Đăng nhập | `{displayName, currentPassword?, newPassword?}` (đổi mật khẩu thì cần mật khẩu hiện tại) | `200` `UserView` · `400` · `401 INVALID_CREDENTIALS` |
 | GET | `/api/auctions` | Đăng nhập | `?status=ACTIVE&page=1&pageSize=20` (`status` bỏ trống = tất cả) | `200` `{items, page, pageSize, hasMore}` |
 | GET | `/api/auctions/{id}` | Đăng nhập | — | `200` `AuctionView` · `404 AUCTION_NOT_FOUND` |
 | GET | `/api/auctions/{id}/bids` | Đăng nhập | `?before=<bidId>&limit=20` | `200` danh sách `BidView`, mới nhất trước |
@@ -184,6 +185,7 @@ thông điệp, tối đa 64 KiB; kết nối im lặng quá 45 giây bị đón
 3. `JOIN_AUCTION` `{"auctionId":1}` → snapshot `{auction, recentBids}`; từ đây nhận sự kiện của phiên.
 4. `PLACE_BID` `{"auctionId":1,"amount":280000}` → biên nhận; mọi người trong phòng nhận `AUCTION_UPDATED`.
 5. Sự kiện server đẩy: `AUCTION_STARTED`, `AUCTION_UPDATED`, `AUCTION_EXTENDED`, `AUCTION_FINISHED` (payload `AuctionView`).
+6. `UPDATE_PROFILE` `{"displayName":"...","currentPassword":"...","newPassword":"..."}` → `UserView` mới (dùng chung cho TCP và WebSocket; mật khẩu mới để trống = không đổi).
 
 ```json
 {"protocolVersion":1,"kind":"REQUEST","type":"AUTH","requestId":"7c1e...","payload":{"token":"q3Zk..."}}

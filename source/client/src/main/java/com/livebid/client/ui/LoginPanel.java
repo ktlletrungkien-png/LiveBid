@@ -6,7 +6,6 @@ import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.RegisterPayload;
 import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -55,7 +54,9 @@ final class LoginPanel extends JPanel {
         setBorder(new EmptyBorder(20, 24, 20, 24));
 
         JLabel title = new JLabel("Đăng nhập để tiếp tục");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        UiTheme.title(title, 26f);
+        UiTheme.primary(loginButton);
+        UiTheme.primary(registerButton);
         add(title, BorderLayout.NORTH);
 
         JTabbedPane tabs = new JTabbedPane();

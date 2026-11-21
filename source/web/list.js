@@ -1,10 +1,12 @@
 // Danh sách phiên đấu giá (REST /api/auctions): lọc theo trạng thái, phân trang, làm mới.
-// renderAuctionTable cũng được màn hình "Phiên của tôi" dùng lại.
+// renderAuctionTable cũng được "Phiên của tôi" và trang quản trị dùng lại.
 
 import { api } from "./api.js";
-import { el, formatMoney, formatTime, statusBadge } from "./util.js";
+import { el, formatDuration, formatMoney, formatTime, statusBadge } from "./util.js";
 
 const PAGE_SIZE = 10;
+/** Cùng cửa sổ chống bắn tỉa của server: còn ít hơn thế thì đồng hồ chuyển đỏ. */
+const URGENT_MILLIS = 10_000;
 
 const FILTERS = [
     { value: "", label: "Tất cả" },
@@ -13,42 +15,100 @@ const FILTERS = [
     { value: "FINISHED", label: "Đã kết thúc" },
 ];
 
+// ---------------------------------------------------------------- đồng hồ trên từng dòng
+
+let tickerStarted = false;
+
 /**
- * Bảng các phiên: tên, giá, trạng thái, thời gian. Bấm vào dòng để vào phòng.
+ * Một bộ đếm giờ duy nhất cho mọi bảng đang hiện: mỗi giây cập nhật các ô có {@code data-clock}.
+ * Thời gian còn lại tính theo giờ server (offset = serverTime - Date.now() lúc nhận danh sách), không theo giờ máy.
+ */
+function ensureTicker() {
+    if (tickerStarted) {
+        return;
+    }
+    tickerStarted = true;
+    setInterval(refreshClocks, 1000);
+}
+
+function refreshClocks() {
+    const now = Date.now();
+    document.querySelectorAll("[data-clock]").forEach((node) => updateClock(node, now));
+}
+
+function updateClock(node, now) {
+    const serverNow = now + Number(node.dataset.offset);
+    if (node.dataset.status === "ACTIVE") {
+        const left = Number(node.dataset.endsAt) - serverNow;
+        node.textContent = left > 0 ? `Còn ${formatDuration(left)}` : "Đang chốt phiên…";
+        node.classList.toggle("urgent", left > 0 && left <= URGENT_MILLIS);
+    } else {
+        const until = Number(node.dataset.startsAt) - serverNow;
+        node.textContent = until > 0 ? `Bắt đầu sau ${formatDuration(until)}` : "Sắp bắt đầu";
+    }
+}
+
+function clockCell(auction, offset) {
+    if (auction.status === "FINISHED") {
+        return el("span", { class: "t-left", text: `Kết thúc lúc ${formatTime(auction.endsAt)}` });
+    }
+    const node = el("span", {
+        class: "t-left",
+        "data-clock": "",
+        "data-status": auction.status,
+        "data-starts-at": auction.startsAt,
+        "data-ends-at": auction.endsAt,
+        "data-offset": offset,
+    });
+    updateClock(node, Date.now()); // điền ngay, không chờ nhịp đếm giờ đầu tiên
+    return node;
+}
+
+/**
+ * Danh mục lô: số lô, tên và thời gian, giá, trạng thái kèm đồng hồ. Bấm vào dòng để vào phòng.
  * {@code extraColumn}: tùy chọn { header, cell(auction) } để thêm một cột (ví dụ nút "Sửa" ở trang quản trị).
  */
 export function renderAuctionTable(items, { emptyText = "Chưa có phiên nào.", extraColumn = null } = {}) {
     if (items.length === 0) {
         return el("p", { class: "muted", text: emptyText });
     }
+    ensureTicker();
     const open = (id) => {
         location.hash = `#/auction/${id}`;
     };
-    const rows = items.map((a) => el("tr", {
-        class: "clickable",
-        tabindex: 0,
-        onclick: () => open(a.auctionId),
-        onkeydown: (event) => {
-            if (event.key === "Enter") {
-                open(a.auctionId);
-            }
+    const rows = items.map((a) => {
+        const offset = a.serverTime - Date.now();
+        const clock = clockCell(a, offset);
+        return el("tr", {
+            class: "clickable",
+            tabindex: 0,
+            onclick: () => open(a.auctionId),
+            onkeydown: (event) => {
+                if (event.key === "Enter") {
+                    open(a.auctionId);
+                }
+            },
         },
-    },
-        el("td", {}, el("a", { href: `#/auction/${a.auctionId}`, onclick: (e) => e.stopPropagation(), text: a.title })),
-        el("td", { class: "num" }, formatMoney(a.currentPrice),
-            a.hasBids ? null : el("small", { class: "muted", text: " (khởi điểm)" })),
-        el("td", {}, statusBadge(a.status)),
-        el("td", { text: formatTime(a.startsAt) }),
-        el("td", { text: formatTime(a.endsAt) }),
-        extraColumn ? el("td", { onclick: (e) => e.stopPropagation() }, extraColumn.cell(a)) : null,
-    ));
-    return el("div", { class: "table-wrap" }, el("table", {},
+            el("td", { class: "c-lot" }, el("span", { class: "lot-no", text: String(a.auctionId) })),
+            el("td", { class: "c-title" },
+                el("a", { class: "lot-title", href: `#/auction/${a.auctionId}`, onclick: (e) => e.stopPropagation(), text: a.title }),
+                el("span", { class: "lot-meta", text: `${formatTime(a.startsAt)} đến ${formatTime(a.endsAt)}` })),
+            el("td", { class: "price c-price" }, formatMoney(a.currentPrice),
+                a.hasBids ? null : el("small", { text: "giá khởi điểm" })),
+            el("td", { class: "c-status" }, statusBadge(a.status), clock),
+            extraColumn ? el("td", { class: "c-extra", onclick: (e) => e.stopPropagation() }, extraColumn.cell(a)) : null,
+        );
+    });
+    const table = el("div", { class: "table-wrap catalog" }, el("table", {},
         el("thead", {}, el("tr", {},
-            el("th", { text: "Sản phẩm" }), el("th", { class: "num", text: "Giá" }), el("th", { text: "Trạng thái" }),
-            el("th", { text: "Bắt đầu" }), el("th", { text: "Kết thúc" }),
+            el("th", { text: "Lô" }), el("th", { text: "Sản phẩm" }), el("th", { class: "num", text: "Giá" }),
+            el("th", { text: "Trạng thái" }),
             extraColumn ? el("th", { text: extraColumn.header }) : null)),
         el("tbody", {}, rows)));
+    return table;
 }
+
+// ---------------------------------------------------------------- màn hình
 
 export default {
     route: "auctions",
@@ -64,8 +124,8 @@ export default {
         const message = el("p", { class: "form-message", role: "alert" });
         const result = el("div", { "aria-live": "polite" });
         const pageLabel = el("span", { class: "muted" });
-        const prev = el("button", { type: "button", text: "← Trước", onclick: () => go(page - 1) });
-        const next = el("button", { type: "button", text: "Sau →", onclick: () => go(page + 1) });
+        const prev = el("button", { type: "button", text: "Trang trước", onclick: () => go(page - 1) });
+        const next = el("button", { type: "button", text: "Trang sau", onclick: () => go(page + 1) });
         const filterBar = el("div", { class: "tabs", role: "tablist" });
 
         function drawFilters() {
@@ -94,7 +154,9 @@ export default {
                     return;
                 }
                 hasMore = data.hasMore;
-                result.replaceChildren(renderAuctionTable(data.items, { emptyText: "Không có phiên nào ở trạng thái này." }));
+                result.replaceChildren(renderAuctionTable(data.items, {
+                    emptyText: status ? "Chưa có phiên nào ở trạng thái này. Chọn “Tất cả” để xem mọi phiên." : "Chưa có phiên nào. Phiên mới sẽ hiện ở đây.",
+                }));
                 pageLabel.textContent = `Trang ${data.page}`;
                 prev.disabled = page <= 1;
                 next.disabled = !hasMore;

@@ -24,6 +24,15 @@ public interface AuthService {
 
     CompletableFuture<UserPrincipal> login(String username, String password);
 
+    /**
+     * Người dùng tự sửa thông tin của mình: đổi tên hiển thị, và đổi mật khẩu nếu {@code newPassword} khác rỗng
+     * (khi đó {@code currentPassword} phải đúng). Thành công thì các token của người dùng này mang thông tin mới.
+     *
+     * <p>Lỗi: {@code VALIDATION_ERROR}, {@code INVALID_CREDENTIALS} (sai mật khẩu hiện tại).
+     */
+    CompletableFuture<UserPrincipal> updateProfile(UserPrincipal user, String displayName,
+                                                   String currentPassword, String newPassword);
+
     /** Cấp token cho web (REST + WebSocket AUTH). Lưu trong bộ nhớ ở bản đầu. */
     String issueToken(UserPrincipal user);
 

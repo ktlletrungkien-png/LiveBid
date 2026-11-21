@@ -88,6 +88,17 @@ export function parseMoneyInput(text) {
     return Number.isSafeInteger(value) && value > 0 ? value : Number.NaN;
 }
 
+/**
+ * Chữ cái đầu cho ảnh đại diện: chữ cái đầu tiên của hai từ cuối có chữ ("Cao Công Hoè" → "CH",
+ * "Hoè (Desktop)" → "HD"). Bỏ qua dấu câu, số; không có chữ nào thì "?".
+ */
+export function initials(name) {
+    const letters = String(name ?? "").trim().split(/\s+/)
+        .map((word) => word.match(/\p{L}/u)?.[0])
+        .filter(Boolean);
+    return letters.slice(-2).join("").toUpperCase() || "?";
+}
+
 export const STATUS_LABEL = {
     SCHEDULED: "Sắp diễn ra",
     ACTIVE: "Đang diễn ra",

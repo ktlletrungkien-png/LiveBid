@@ -1,9 +1,9 @@
 package com.livebid.client;
 
 import com.livebid.client.ui.MainFrame;
+import com.livebid.client.ui.UiTheme;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
 
 /**
  * Điểm khởi động desktop client (Swing).
@@ -23,7 +23,8 @@ public final class ClientMain {
     }
 
     private static void start() {
-        useSystemLookAndFeel();
+        // Giao diện LiveBid (bảng màu và font chung với trang web); phải cài trước khi tạo cửa sổ.
+        UiTheme.install();
         ClientConfig config;
         try {
             config = ClientConfig.load();
@@ -33,13 +34,5 @@ public final class ClientMain {
             return;
         }
         new MainFrame(config).setVisible(true);
-    }
-
-    private static void useSystemLookAndFeel() {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException e) {
-            // Giữ look-and-feel mặc định của Java; giao diện vẫn dùng được.
-        }
     }
 }

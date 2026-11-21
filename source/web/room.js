@@ -2,6 +2,9 @@
 //
 // Trình tự: mở /ws → AUTH (token từ REST) → JOIN_AUCTION nhận snapshot → PLACE_BID, nhận sự kiện AUCTION_*.
 // Mất kết nối thì LiveSocket tự thử lại; mỗi lần kết nối lại màn hình này vào lại phòng để lấy snapshot mới.
+//
+// Giao diện: ô giá đổi màu theo vị trí của người xem (xem positionOf): xanh lục khi đang dẫn đầu, đỏ khi bị vượt,
+// và đồng hồ chuyển đỏ nhấp nháy ở 10 giây cuối.
 
 import { session } from "./api.js";
 import { LiveSocket } from "./socket.js";
@@ -12,6 +15,16 @@ import {
 const BID_TIMEOUT_MS = 10_000;
 const HISTORY_LIMIT = 20;
 const TICK_MS = 250;
+/** Cùng cửa sổ chống bắn tỉa của server: còn ít hơn thế thì đồng hồ chuyển đỏ. */
+const CLOSING_MILLIS = 10_000;
+
+/** Nút chọn nhanh: giá tối thiểu cộng thêm n lần bước giá. */
+const QUICK_BIDS = [
+    { label: "Tối thiểu", steps: 0 },
+    { label: "+1 bước", steps: 1 },
+    { label: "+5 bước", steps: 5 },
+    { label: "+10 bước", steps: 10 },
+];
 
 // ---------------------------------------------------------------- logic thuần (không đụng DOM)
 
@@ -41,6 +54,48 @@ export function isUnknownOutcome(error) {
     return error?.code === "TIMEOUT" || error?.code === "CONNECTION_LOST";
 }
 
+/**
+ * Vị trí của người xem trong phòng, quyết định màu ô giá:
+ * upcoming (chưa bắt đầu) · leading (đang dẫn đầu) · outbid (đã đặt nhưng bị vượt) · watching (chưa đặt) ·
+ * won (đã thắng) · ended (kết thúc, không thắng).
+ * Nhận diện theo tên hiển thị nên hai người trùng tên có thể bị nhầm (hạn chế đã biết).
+ */
+export function positionOf(auction, myName, participated) {
+    if (!auction) {
+        return "watching";
+    }
+    if (auction.status === "FINISHED") {
+        return auction.winnerDisplayName && auction.winnerDisplayName === myName ? "won" : "ended";
+    }
+    if (auction.status === "SCHEDULED") {
+        return "upcoming";
+    }
+    if (auction.hasBids && auction.leaderDisplayName === myName) {
+        return "leading";
+    }
+    return participated ? "outbid" : "watching";
+}
+
+/** Dòng chữ dưới giá, nói rõ vị trí hiện tại. */
+export function positionText(auction, position) {
+    switch (position) {
+        case "leading":
+            return "Bạn đang dẫn đầu";
+        case "outbid":
+            return "Bạn đã bị vượt giá. Đặt cao hơn để giành lại.";
+        case "won":
+            return "Bạn đã thắng phiên này";
+        case "upcoming":
+            return "Phiên chưa bắt đầu";
+        case "ended":
+            return auction.winnerDisplayName
+                ? `${auction.winnerDisplayName} thắng phiên này`
+                : "Phiên đã kết thúc, chưa có người thắng";
+        default:
+            return auction.hasBids ? `${auction.leaderDisplayName ?? "Một người"} đang dẫn đầu` : "Chưa có ai đặt giá";
+    }
+}
+
 // ---------------------------------------------------------------- màn hình
 
 export default {
@@ -52,7 +107,7 @@ export default {
         const me = session.user;
         if (!Number.isSafeInteger(auctionId) || auctionId <= 0) {
             container.append(el("p", { class: "form-message", text: "Mã phiên không hợp lệ." }),
-                el("a", { href: "#/auctions", text: "← Về danh sách" }));
+                el("a", { href: "#/auctions", class: "back", text: "Danh sách phiên" }));
             return null;
         }
 
@@ -64,23 +119,32 @@ export default {
             joined: false,
             pending: false,
             dirty: false,
+            participated: false,
             connection: "connecting",
         };
         let disposed = false;
 
         // ---- dựng giao diện
-        const title = el("h2", { text: "Đang tải…" });
+        const title = el("h2", { class: "room-title", text: "Đang tải…" });
         const statusSlot = el("span");
         const connection = el("span", { class: "badge badge-connecting", text: "Đang kết nối…" });
-        const description = el("p", { class: "muted" });
-        const priceLabel = el("span", { class: "stat-label", text: "Giá" });
-        const price = el("span", { class: "stat-value" });
-        const leader = el("span", { class: "stat-value" });
-        const countdown = el("span", { class: "stat-value countdown" });
-        const startingPrice = el("span", { class: "stat-value small" });
-        const increment = el("span", { class: "stat-value small" });
-        const timeRange = el("span", { class: "stat-value small" });
-        const extensions = el("span", { class: "stat-value small" });
+        const description = el("p", { class: "room-desc muted" });
+
+        const priceLabel = el("p", { class: "slab-label" });
+        const price = el("p", { class: "slab-price", text: "—" });
+        const slabStatus = el("p", { class: "slab-status" });
+        const slab = el("div", { class: "slab", "data-state": "watching" }, priceLabel, price, slabStatus);
+
+        const clockLabel = el("p", { class: "clock-label", text: "Còn lại" });
+        const countdown = el("p", { class: "countdown" });
+        const clockSub = el("p", { class: "clock-sub muted" });
+        const clock = el("div", { class: "clock", "data-closing": "false" },
+            el("div", {}, clockLabel, countdown), clockSub);
+
+        const factStart = el("dd");
+        const factStep = el("dd");
+        const factRange = el("dd");
+        const factExtensions = el("dd");
 
         const amountInput = el("input", {
             type: "text", inputmode: "numeric", autocomplete: "off", "aria-label": "Số tiền đặt giá",
@@ -89,77 +153,96 @@ export default {
             },
         });
         const bidButton = el("button", { type: "submit", class: "primary", text: "Đặt giá" });
-        const bidHint = el("p", { class: "muted" });
-        const bidMessage = el("p", { class: "form-message", role: "status" });
+        const chips = QUICK_BIDS.map((quick) => el("button", {
+            type: "button",
+            text: quick.label,
+            onclick: () => {
+                const a = state.auction;
+                if (a) {
+                    setAmount(minimumNextBid(a) + quick.steps * a.minIncrement, quick.steps > 0);
+                }
+            },
+        }));
+        const bidHint = el("p", { class: "bid-hint muted" });
+        const bidMessage = el("p", { class: "form-message bid-message", role: "status" });
         const bidForm = el("form", { class: "bid-form", novalidate: true }, amountInput, bidButton);
-        const bidBox = el("div", { class: "card" }, el("h3", { text: "Đặt giá" }), bidForm, bidHint, bidMessage);
+        const paddle = el("div", { class: "paddle" },
+            el("h3", { text: "Đặt giá của bạn" }), bidForm, el("div", { class: "chips" }, chips), bidHint, bidMessage);
         const notices = el("ul", { class: "notices", "aria-live": "polite" });
         const historyBody = el("tbody");
 
         container.append(
-            el("a", { href: "#/auctions", class: "back", text: "← Danh sách phiên" }),
-            el("div", { class: "room-head" }, title, statusSlot, connection),
+            el("a", { href: "#/auctions", class: "back", text: "Danh sách phiên" }),
+            el("div", { class: "room-top" }, el("span", { class: "lot", text: `Lô ${auctionId}` }), statusSlot, connection),
+            title,
             description,
-            el("div", { class: "stats" },
-                stat(priceLabel, price),
-                stat("Người dẫn đầu", leader),
-                stat("Còn lại", countdown),
-                stat("Giá khởi điểm", startingPrice),
-                stat("Bước giá tối thiểu", increment),
-                stat("Thời gian", timeRange),
-                stat("Số lần gia hạn", extensions)),
+            el("div", { class: "floor" }, slab, clock),
             me?.role === "ADMIN"
                 ? el("p", { class: "muted", text: "Tài khoản quản trị chỉ xem phiên, không đặt giá." })
-                : bidBox,
+                : paddle,
+            el("dl", { class: "facts" },
+                fact("Giá khởi điểm", factStart), fact("Bước giá tối thiểu", factStep),
+                fact("Thời gian", factRange), fact("Số lần gia hạn", factExtensions)),
             el("h3", { text: "Thông báo" }),
             notices,
             el("h3", { text: "Lịch sử đặt giá" }),
-            el("div", { class: "table-wrap" }, el("table", {},
+            el("div", { class: "table-wrap tape" }, el("table", {},
                 el("thead", {}, el("tr", {},
                     el("th", { text: "Thời gian" }), el("th", { text: "Người đặt" }), el("th", { class: "num", text: "Số tiền" }))),
                 historyBody)),
         );
 
-        function stat(label, valueNode) {
-            return el("div", { class: "stat" },
-                typeof label === "string" ? el("span", { class: "stat-label", text: label }) : label, valueNode);
+        function fact(label, valueNode) {
+            return el("div", {}, el("dt", { text: label }), valueNode);
         }
 
         // ---- cập nhật giao diện từ trạng thái
+        function position() {
+            return positionOf(state.auction, me?.displayName, state.participated);
+        }
+
         function renderAuction() {
             const a = state.auction;
             if (!a) {
                 return;
             }
+            const current = position();
             title.textContent = a.title;
             statusSlot.replaceChildren(statusBadge(a.status));
             description.textContent = a.description || "";
             // "Giá khởi điểm" khi chưa ai đặt; "Giá đã được đặt" khi đã có người đặt.
             priceLabel.textContent = a.hasBids ? "Giá đã được đặt" : "Giá khởi điểm";
             price.textContent = formatMoney(a.currentPrice);
-            leader.textContent = a.leaderDisplayName ?? (a.hasBids ? "—" : "Chưa có");
-            startingPrice.textContent = formatMoney(a.startingPrice);
-            increment.textContent = formatMoney(a.minIncrement);
-            timeRange.textContent = `${formatTime(a.startsAt)} → ${formatTime(a.endsAt)}`;
-            extensions.textContent = String(a.extensionCount);
+            slab.dataset.state = current;
+            slabStatus.textContent = positionText(a, current);
+            factStart.textContent = formatMoney(a.startingPrice);
+            factStep.textContent = formatMoney(a.minIncrement);
+            factRange.textContent = `${formatTime(a.startsAt)} đến ${formatTime(a.endsAt)}`;
+            factExtensions.textContent = String(a.extensionCount);
+            clockLabel.textContent = a.status === "SCHEDULED" ? "Bắt đầu sau" : a.status === "ACTIVE" ? "Còn lại" : "Đã kết thúc";
+            clockSub.textContent = a.status === "SCHEDULED" ? `Bắt đầu lúc ${formatTime(a.startsAt)}` : `Kết thúc lúc ${formatTime(a.endsAt)}`;
             renderBidControls();
             tick();
+            if (!slab.classList.contains("animated")) {
+                // Bật hiệu ứng chuyển màu sau lần vẽ đầu, để lần hiện đầu tiên không chạy từ màu trung tính.
+                requestAnimationFrame(() => slab.classList.add("animated"));
+            }
         }
 
         function renderBids() {
             historyBody.replaceChildren(...(state.bids.length === 0
-                ? [el("tr", {}, el("td", { colspan: 3, class: "muted", text: "Chưa có lượt đặt giá nào." }))]
+                ? [el("tr", {}, el("td", { colspan: 3, class: "muted", text: "Chưa có lượt đặt giá nào. Bạn có thể là người đầu tiên." }))]
                 : state.bids.map((bid) => el("tr", { class: bid.bidderDisplayName === me?.displayName ? "mine" : null },
                     el("td", { text: formatTime(bid.acceptedAt, { seconds: true }) }),
                     el("td", { text: bid.bidderDisplayName }),
-                    el("td", { class: "num", text: formatMoney(bid.amount) })))));
+                    el("td", { class: "price", text: formatMoney(bid.amount) })))));
         }
 
         function renderConnection() {
             const labels = {
                 connecting: ["Đang kết nối…", "connecting"],
                 online: ["Đã kết nối", "online"],
-                offline: ["Mất kết nối — đang thử lại…", "offline"],
+                offline: ["Mất kết nối, đang thử lại…", "offline"],
                 "auth-failed": ["Không xác thực được", "offline"],
                 closed: ["Đã đóng", "offline"],
             };
@@ -193,9 +276,17 @@ export default {
             const disabled = reason !== null;
             amountInput.disabled = disabled;
             bidButton.disabled = disabled;
+            chips.forEach((chip) => {
+                chip.disabled = disabled;
+            });
             const a = state.auction;
-            bidHint.textContent = reason
-                ?? (a ? `Giá tối thiểu: ${formatMoney(minimumNextBid(a))}` : "");
+            bidHint.textContent = reason ?? (a ? `Giá tối thiểu: ${formatMoney(minimumNextBid(a))}` : "");
+        }
+
+        function setAmount(value, typed) {
+            amountInput.value = formatNumber(value);
+            state.dirty = typed;
+            amountInput.focus();
         }
 
         function prefillBid(force = false) {
@@ -216,22 +307,38 @@ export default {
             if (!a) {
                 return;
             }
-            const now = Date.now() + state.offset;
+            let closing = false;
             if (a.status === "SCHEDULED") {
-                countdown.textContent = "Bắt đầu sau " + formatDuration(a.startsAt - now);
+                countdown.textContent = formatDuration(a.startsAt - (Date.now() + state.offset));
             } else if (a.status === "ACTIVE") {
                 const left = remainingMillis(a, state.offset, Date.now());
-                countdown.textContent = left > 0 ? formatDuration(left) : "Đang chốt phiên…";
+                countdown.textContent = left > 0 ? formatDuration(left) : "Đang chốt";
+                closing = left > 0 && left <= CLOSING_MILLIS;
             } else {
-                countdown.textContent = "Đã kết thúc";
+                countdown.textContent = "00:00";
             }
+            clock.dataset.closing = String(closing);
         }
 
         function notice(text, kind = "info") {
             notices.prepend(el("li", { class: `notice-${kind}` },
-                el("time", { text: new Date().toLocaleTimeString("vi-VN") + " " }), text));
+                el("time", { text: new Date().toLocaleTimeString("vi-VN") }), text));
             while (notices.children.length > 20) {
                 notices.lastChild.remove();
+            }
+        }
+
+        /** Nháy nhẹ ô giá khi giá tăng, để mắt bắt được thay đổi. */
+        function flashPrice() {
+            price.classList.remove("flash");
+            void price.offsetWidth; // khởi động lại hiệu ứng
+            price.classList.add("flash");
+        }
+
+        /** Có lượt đặt giá của mình trong danh sách thì coi như đã tham gia đặt giá. */
+        function noteParticipation() {
+            if (me && state.bids.some((bid) => bid.bidderDisplayName === me.displayName)) {
+                state.participated = true;
             }
         }
 
@@ -240,9 +347,14 @@ export default {
             if (!shouldApply(state.auction, view, force)) {
                 return false; // bản cũ hơn hoặc trùng: bỏ qua
             }
-            const previousLeader = state.auction?.leaderDisplayName ?? null;
+            const previous = state.auction;
+            const previousLeader = previous?.leaderDisplayName ?? null;
+            const raised = previous !== null && view.currentPrice > previous.currentPrice;
             state.auction = view;
             state.offset = view.serverTime - Date.now();
+            if (me && view.hasBids && view.leaderDisplayName === me.displayName) {
+                state.participated = true;
+            }
             if (me && previousLeader === me.displayName && view.leaderDisplayName
                 && view.leaderDisplayName !== me.displayName) {
                 notice("Bạn đã bị vượt giá", "warn");
@@ -250,6 +362,9 @@ export default {
             }
             renderAuction();
             prefillBid();
+            if (raised) {
+                flashPrice();
+            }
             return true;
         }
 
@@ -311,8 +426,9 @@ export default {
                     return;
                 }
                 state.joined = true;
-                applyAuction(snapshot.auction, true);
                 state.bids = snapshot.recentBids ?? [];
+                noteParticipation();
+                applyAuction(snapshot.auction, true);
                 renderBids();
                 renderAuction();
                 prefillBid();
@@ -333,7 +449,9 @@ export default {
                 const list = await socket.request("GET_BID_HISTORY", { auctionId, limit: HISTORY_LIMIT });
                 if (!disposed) {
                     state.bids = list ?? [];
+                    noteParticipation();
                     renderBids();
+                    renderAuction();
                 }
             } catch {
                 // lịch sử sẽ được tải lại ở sự kiện kế tiếp
@@ -342,7 +460,7 @@ export default {
 
         function setBidMessage(text, kind) {
             bidMessage.textContent = text;
-            bidMessage.className = `form-message ${kind ?? ""}`;
+            bidMessage.className = `form-message bid-message ${kind ?? ""}`;
         }
 
         bidForm.addEventListener("submit", async (event) => {
@@ -361,6 +479,7 @@ export default {
             try {
                 const receipt = await socket.request("PLACE_BID", { auctionId, amount }, BID_TIMEOUT_MS);
                 state.dirty = false;
+                state.participated = true;
                 setBidMessage(`Đặt giá thành công: ${formatMoney(receipt.acceptedAmount)}`, "ok");
             } catch (error) {
                 if (isUnknownOutcome(error)) {

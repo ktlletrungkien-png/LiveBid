@@ -14,4 +14,10 @@ public interface UserRepository {
 
     /** Thêm và trả về bản có id. Trùng username → {@link DataAccessException}. */
     User insert(NewUser user);
+
+    /**
+     * Ghi tên hiển thị và mật khẩu (hash, salt, số vòng lặp) theo {@code user.id()}. Không đổi username, vai trò,
+     * thời điểm tạo. Không có id → {@link DataAccessException}.
+     */
+    void update(User user);
 }

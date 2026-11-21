@@ -8,6 +8,7 @@ import com.livebid.common.Protocol;
 import com.livebid.common.dto.MyAuctionFilter;
 import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.RegisterPayload;
+import com.livebid.common.payload.UpdateProfilePayload;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.JsonCodec;
 import com.livebid.common.rmi.SettlementSummaryDto;
@@ -170,6 +171,7 @@ public final class HttpGateway implements AutoCloseable {
         app.post("/api/login", this::login);
         app.post("/api/logout", this::logout);
         app.get("/api/me", this::me);
+        app.put("/api/me", this::updateMe);
         app.get("/api/me/auctions", this::myAuctions);
         app.get("/api/auctions", this::listAuctions);
         app.post("/api/auctions", this::createAuction);
@@ -264,6 +266,13 @@ public final class HttpGateway implements AutoCloseable {
 
     private void me(Context ctx) {
         respondNow(ctx, 200, principal(ctx).toView());
+    }
+
+    /** PUT /api/me: đổi tên hiển thị và (tùy chọn) mật khẩu; token hiện tại tiếp tục dùng được với thông tin mới. */
+    private void updateMe(Context ctx) {
+        UpdateProfilePayload p = body(ctx, UpdateProfilePayload.class);
+        respond(ctx, 200, auth.updateProfile(principal(ctx), p.displayName(), p.currentPassword(), p.newPassword())
+                .thenApply(UserPrincipal::toView));
     }
 
     private LoginResult loginResult(UserPrincipal user) {

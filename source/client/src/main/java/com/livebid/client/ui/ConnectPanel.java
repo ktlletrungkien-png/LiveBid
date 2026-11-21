@@ -2,7 +2,6 @@ package com.livebid.client.ui;
 
 import com.livebid.client.ClientConfig;
 import com.livebid.client.net.UdpDiscoveryClient;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -50,7 +49,7 @@ final class ConnectPanel extends JPanel {
         gbc.anchor = GridBagConstraints.LINE_START;
 
         JLabel title = new JLabel("Kết nối tới server LiveBid");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        UiTheme.title(title, 26f);
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 2;
@@ -72,12 +71,13 @@ final class ConnectPanel extends JPanel {
         gbc.gridy = 3;
         gbc.gridwidth = 2;
         JPanel buttons = new JPanel();
+        UiTheme.primary(connectButton);
         buttons.add(discoverButton);
         buttons.add(connectButton);
         add(buttons, gbc);
 
         gbc.gridy = 4;
-        messageLabel.setFont(messageLabel.getFont().deriveFont(Font.PLAIN));
+        messageLabel.setForeground(UiTheme.MUTED);
         add(messageLabel, gbc);
 
         discoverButton.addActionListener(e -> discover());

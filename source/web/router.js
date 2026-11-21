@@ -5,7 +5,7 @@
 // gọi khi chuyển sang màn hình khác. Công việc bất đồng bộ trong view phải tự kiểm tra "đã bị dọn dẹp chưa".
 
 import { api, session } from "./api.js";
-import { clear, el, toast } from "./util.js";
+import { clear, el, initials, toast } from "./util.js";
 
 const views = new Map();
 let cleanup = null;
@@ -34,6 +34,17 @@ export function navigate(hash) {
 export function start() {
     started = true;
     window.addEventListener("hashchange", route);
+    // Menu tài khoản đóng khi bấm ra ngoài hoặc nhấn Esc.
+    document.addEventListener("click", (event) => {
+        if (!event.target.closest?.(".user-menu")) {
+            closeMenus();
+        }
+    });
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            closeMenus();
+        }
+    });
     session.onChange((reason) => {
         renderNav();
         if (!session.user) {
@@ -113,14 +124,56 @@ function renderNav() {
             text: view.title,
         }));
     }
-    box.append(
-        el("span", { class: "user-name", text: user.displayName }),
-        el("span", { class: `badge badge-role-${user.role.toLowerCase()}`, text: user.role }),
-        el("button", { type: "button", class: "link-button", text: "Đăng xuất", onclick: logout }),
+    box.append(userMenu(user));
+}
+
+/**
+ * Ảnh đại diện + tên ở góc phải. Bấm vào mở menu: thông tin tài khoản, "Cập nhật thông tin", "Đăng xuất".
+ */
+function userMenu(user) {
+    const role = user.role.toLowerCase();
+    const menu = el("div", { class: "menu", role: "menu", hidden: true },
+        el("div", { class: "menu-head" },
+            el("span", { class: "avatar avatar-lg", "aria-hidden": "true", text: initials(user.displayName) }),
+            el("div", {},
+                el("strong", { text: user.displayName }),
+                el("span", { class: "muted", text: `@${user.username}` }))),
+        el("a", { href: "#/profile", role: "menuitem", class: "menu-item", text: "Cập nhật thông tin", onclick: closeMenus }),
+        el("button", { type: "button", role: "menuitem", class: "menu-item danger", text: "Đăng xuất", onclick: logout }),
     );
+    const trigger = el("button", {
+        type: "button",
+        class: "user-trigger",
+        "aria-haspopup": "menu",
+        "aria-expanded": "false",
+        title: "Tài khoản",
+        onclick: () => {
+            const open = menu.hidden;
+            closeMenus();
+            if (open) {
+                menu.hidden = false;
+                trigger.setAttribute("aria-expanded", "true");
+                menu.querySelector(".menu-item")?.focus();
+            }
+        },
+    },
+        el("span", { class: "avatar", "aria-hidden": "true", text: initials(user.displayName) }),
+        el("span", { class: "user-name", text: user.displayName }),
+        el("span", { class: `badge badge-role-${role}`, text: user.role }),
+        el("span", { class: "caret", "aria-hidden": "true" }),
+    );
+    return el("div", { class: "user-menu" }, trigger, menu);
+}
+
+function closeMenus() {
+    document.querySelectorAll(".user-menu .menu").forEach((menu) => {
+        menu.hidden = true;
+    });
+    document.querySelectorAll(".user-trigger").forEach((button) => button.setAttribute("aria-expanded", "false"));
 }
 
 async function logout() {
+    closeMenus();
     try {
         await api.logout();
     } catch {

@@ -75,10 +75,14 @@ export default {
 
         draw();
         container.append(
-            el("h2", { text: "Chào mừng đến với LiveBid" }),
-            el("p", { class: "muted", text: "Đăng nhập để xem và tham gia các phiên đấu giá trực tuyến." }),
-            tabs,
-            form,
+            el("div", { class: "login-hero" },
+                el("div", { class: "hero-copy" },
+                    // Hai dòng cố định để không bị ngắt dòng xấu (chữ "lúc." lẻ loi).
+                    el("h2", { class: "hero-title" },
+                        el("span", { class: "hero-line", text: "Đặt giá" }),
+                        el("span", { class: "hero-line", text: "đúng lúc." })),
+                    el("p", { class: "hero-sub muted", text: "Theo dõi giá và đồng hồ trực tiếp, đặt giá ngay trong phòng đấu giá." })),
+                el("div", { class: "hero-form" }, tabs, form)),
         );
         return () => {};
     },

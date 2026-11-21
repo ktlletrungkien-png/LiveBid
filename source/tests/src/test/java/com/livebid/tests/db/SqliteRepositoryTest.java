@@ -97,6 +97,28 @@ class SqliteRepositoryTest {
         assertThrows(DataAccessException.class, () -> users.insert(newUser("ABC", Role.USER)));
     }
 
+    @Test
+    void userUpdateChangesDisplayNameAndPasswordButKeepsUsernameAndRole() {
+        User saved = users.insert(newUser("hoe", Role.USER));
+
+        users.update(new User(saved.id(), "khac", "Tên mới", "hash2", "salt2", 2000, Role.ADMIN, 999L));
+
+        User reloaded = users.findById(saved.id()).orElseThrow();
+        assertEquals("hoe", reloaded.username(), "username không đổi");
+        assertEquals(Role.USER, reloaded.role(), "vai trò không đổi");
+        assertEquals(1L, reloaded.createdAt(), "thời điểm tạo không đổi");
+        assertEquals("Tên mới", reloaded.displayName());
+        assertEquals("hash2", reloaded.passwordHash());
+        assertEquals("salt2", reloaded.passwordSalt());
+        assertEquals(2000, reloaded.passwordIterations());
+    }
+
+    @Test
+    void userUpdateOfMissingRowThrows() {
+        assertThrows(DataAccessException.class,
+                () -> users.update(new User(4242, "x", "X", "h", "s", 1, Role.USER, 1L)));
+    }
+
     // 3. Phiên đấu giá
 
     @Test

@@ -9,7 +9,6 @@ import com.livebid.common.payload.MyAuctionsPayload;
 import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.lang.reflect.Type;
@@ -63,6 +62,7 @@ final class MyAuctionsPanel extends JPanel {
         table.setRowHeight(24);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getTableHeader().setReorderingAllowed(false);
+        UiTheme.table(table);
         table.setToolTipText("Bấm đúp vào một phiên để vào phòng đấu giá");
         table.addMouseListener(new MouseAdapter() {
             @Override
@@ -90,7 +90,7 @@ final class MyAuctionsPanel extends JPanel {
         JPanel header = new JPanel(new BorderLayout(0, 6));
 
         JLabel title = new JLabel("Phiên của tôi");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        UiTheme.title(title, 24f);
         header.add(title, BorderLayout.NORTH);
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));

@@ -25,6 +25,11 @@ Server tìm thư mục web theo khóa `http.webRoot` (mặc định `web`, tính
 | Phiên của tôi | `#/mine` | REST | Phiên đã tham gia / đã thắng |
 | Quản trị (ADMIN) | `#/admin` | REST | Tạo phiên, sửa phiên chưa bắt đầu |
 | Thống kê | `#/stats` | REST | Số liệu từ Settlement; hiện "Dịch vụ thống kê chưa chạy" khi Settlement tắt |
+| Thông tin tài khoản | `#/profile` | REST | Đổi tên hiển thị; đổi mật khẩu (cần mật khẩu hiện tại) |
+
+**Menu tài khoản:** bấm vào ảnh đại diện + tên ở góc phải thanh trên cùng để mở menu gồm "Cập nhật thông tin"
+và "Đăng xuất". Menu đóng khi bấm ra ngoài hoặc nhấn Esc. Ảnh đại diện là chữ cái đầu của hai từ cuối trong tên
+("Cao Công Hoè" → "CH"), cùng quy tắc với desktop client.
 
 ### Phòng đấu giá
 
@@ -39,6 +44,25 @@ Server tìm thư mục web theo khóa `http.webRoot` (mặc định `web`, tính
 - Trạng thái kết nối luôn hiện. Mất kết nối → khóa nút đặt giá, tự kết nối lại sau 1, 2, 4… tối đa 10 giây,
   gửi lại `AUTH` + `JOIN_AUCTION` để nhận snapshot mới. Gửi `PING` mỗi 15 giây.
 
+## 🎨 Thiết kế
+
+**Ý tưởng:** phòng đấu giá đổi màu theo vị trí của bạn, để nhìn một cái là biết mình đang ở đâu mà không cần đọc chữ.
+
+| Vị trí | Ô giá |
+|---|---|
+| Đang xem, chưa đặt giá | Xanh đêm |
+| Đang dẫn đầu, hoặc đã thắng | Xanh lục |
+| Đã đặt nhưng bị vượt giá | Đỏ |
+| Phiên chưa bắt đầu, hoặc đã kết thúc không thắng | Xám xanh |
+
+Ở 10 giây cuối (cùng cửa sổ chống bắn tỉa của server), đồng hồ chuyển đỏ và nháy. Hiệu ứng chuyển động tắt khi hệ điều hành bật "giảm chuyển động".
+
+- **Màu:** nền phấn xám xanh, chữ và đầu trang màu xanh đêm, nút chính màu nghệ (như tấm paddle đấu giá). Màu theo vai trò (`--lead`, `--outbid`, `--saffron`), không theo tên màu.
+- **Chữ:** một họ duy nhất, Archivo. Số tiền, đồng hồ và số lô đặt ở độ rộng 62%, đậm 900, chữ số đều nét; chữ thường ở độ rộng 100%. Nhãn viết thường, không viết hoa.
+- **Danh sách:** là mục lục lô (số lô, tên, giá, đồng hồ đếm ngược ngay trên từng dòng), không chia thành các thẻ giống nhau.
+- **Điện thoại:** danh mục lô xếp lại thành từng dòng, ô đặt giá dính ở đáy màn hình để đặt giá bằng một tay.
+- **Nút chọn nhanh** trong ô đặt giá: "Tối thiểu", "+1 bước", "+5 bước", "+10 bước".
+
 ## 📦 Cấu trúc
 
 | File | Nội dung |
@@ -49,9 +73,10 @@ Server tìm thư mục web theo khóa `http.webRoot` (mặc định `web`, tính
 | `api.js` | Gọi REST, lưu phiên đăng nhập, lỗi `ApiError` |
 | `socket.js` | `LiveSocket`: kết nối `/ws`, AUTH, ghép RESPONSE theo `requestId`, PING, tự kết nối lại |
 | `util.js` | Dựng DOM an toàn, định dạng tiền/thời gian, đọc số tiền nhập, thông báo nổi |
-| `login.js`, `list.js`, `room.js` | Màn hình đăng nhập, danh sách phiên, phòng đấu giá |
+| `login.js`, `list.js`, `room.js`, `profile.js` | Màn hình đăng nhập, danh sách phiên, phòng đấu giá, thông tin tài khoản |
 | `mine.js`, `admin.js`, `stats.js` | Phiên của tôi, quản trị, thống kê (nạp tùy chọn: thiếu file nào thì bỏ qua) |
-| `style.css` | Giao diện (tự đổi theo chế độ sáng/tối của hệ điều hành) |
+| `style.css` | Toàn bộ giao diện (tự đổi theo chế độ sáng/tối của hệ điều hành); bảng màu khai báo ở `:root` |
+| `fonts/` | Archivo (font biến thiên, đủ tiếng Việt), tự host dạng woff2, không dùng CDN. Giấy phép SIL OFL trong `fonts/OFL-Archivo.txt` |
 
 ## 🔒 An toàn
 

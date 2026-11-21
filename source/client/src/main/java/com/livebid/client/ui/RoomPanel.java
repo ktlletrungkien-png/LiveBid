@@ -22,7 +22,6 @@ import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -110,11 +109,15 @@ final class RoomPanel extends JPanel {
         setLayout(new BorderLayout(0, 8));
         setBorder(new EmptyBorder(12, 12, 12, 12));
 
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 18f));
+        UiTheme.title(titleLabel, 24f);
         descriptionArea.setEditable(false);
         descriptionArea.setLineWrap(true);
         descriptionArea.setWrapStyleWord(true);
-        historyTable.setRowHeight(22);
+        UiTheme.table(historyTable);
+        UiTheme.primary(bidButton);
+        amountField.setFont(UiTheme.money(16f));
+        amountField.setHorizontalAlignment(JTextField.RIGHT);
+        priceCaptionLabel.setForeground(UiTheme.MUTED);
         historyTable.setFillsViewportHeight(true);
         historyTable.getTableHeader().setReorderingAllowed(false);
 
@@ -222,7 +225,11 @@ final class RoomPanel extends JPanel {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1;
 
-        priceLabel.setFont(priceLabel.getFont().deriveFont(Font.BOLD, 16f));
+        // Giá hiện tại nổi bật màu vàng đồng như ô giá trên web; số dùng Be Vietnam Pro (không dùng Playfair).
+        priceLabel.setFont(UiTheme.money(28f));
+        priceLabel.setForeground(UiTheme.GOLD);
+        info.setBackground(UiTheme.SURFACE);
+        info.setBorder(UiTheme.card(14));
 
         gbc.gridy = 0;
         gbc.gridx = 0;
@@ -248,7 +255,7 @@ final class RoomPanel extends JPanel {
         info.add(timeLabel, gbc);
 
         gbc.gridy = 5;
-        countdownLabel.setFont(countdownLabel.getFont().deriveFont(Font.BOLD, 14f));
+        countdownLabel.setFont(UiTheme.money(18f));
         info.add(countdownLabel, gbc);
 
         gbc.gridy = 6;

@@ -4,6 +4,8 @@ import static com.livebid.server.tcp.CommandSupport.payload;
 import static com.livebid.server.tcp.CommandSupport.requireLogin;
 
 import com.livebid.common.dto.LoginResult;
+import com.livebid.common.dto.UserView;
+import com.livebid.common.payload.UpdateProfilePayload;
 import com.livebid.common.payload.AuthPayload;
 import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.RegisterPayload;
@@ -43,6 +45,25 @@ public final class AuthCommands {
         router.register(MessageType.LOGIN, this::login);
         router.register(MessageType.LOGOUT, this::logout);
         router.register(MessageType.AUTH, this::authenticate);
+        router.register(MessageType.UPDATE_PROFILE, this::updateProfile);
+    }
+
+    /**
+     * UPDATE_PROFILE: sửa tên hiển thị / mật khẩu của tài khoản đang đăng nhập trên kết nối này, rồi gắn thông
+     * tin mới vào kết nối. Không gắn lại nếu trong lúc chờ người dùng đã LOGOUT hoặc đổi tài khoản.
+     */
+    private CompletableFuture<UserView> updateProfile(ClientChannel session, Message request)
+            throws ProtocolException {
+        UserPrincipal user = requireLogin(session);
+        UpdateProfilePayload p = payload(request, UpdateProfilePayload.class);
+        return auth.updateProfile(user, p.displayName(), p.currentPassword(), p.newPassword())
+                .thenApply(updated -> {
+                    UserPrincipal now = session.principal();
+                    if (now != null && now.userId() == updated.userId()) {
+                        session.setPrincipal(updated);
+                    }
+                    return updated.toView();
+                });
     }
 
     /**

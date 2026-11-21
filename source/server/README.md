@@ -140,6 +140,7 @@ REST và WebSocket do `http/HttpGateway` (Javalin, cổng 8080) phục vụ, cù
 | `/api/login` | POST | Đăng nhập | Công khai | 200 `{user, token}` |
 | `/api/logout` | POST | Thu hồi token | Đăng nhập | 204 |
 | `/api/me` | GET | Tài khoản đang đăng nhập | Đăng nhập | 200 |
+| `/api/me` | PUT | Đổi tên hiển thị / mật khẩu, `{displayName, currentPassword?, newPassword?}` | Đăng nhập | 200 |
 | `/api/auctions` | GET | Danh sách, `?status&page&pageSize` | Đăng nhập | 200 |
 | `/api/auctions` | POST | Tạo phiên | ADMIN | 201 |
 | `/api/auctions/{id}` | GET | Chi tiết phiên | Đăng nhập | 200 |

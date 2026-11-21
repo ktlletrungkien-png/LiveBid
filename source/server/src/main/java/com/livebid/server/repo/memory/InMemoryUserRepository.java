@@ -38,4 +38,14 @@ public final class InMemoryUserRepository implements UserRepository {
         byId.put(user.id(), user);
         return user;
     }
+
+    @Override
+    public synchronized void update(User u) {
+        User current = byId.get(u.id());
+        if (current == null) {
+            throw new DataAccessException("Không có người dùng " + u.id(), null);
+        }
+        byId.put(u.id(), new User(current.id(), current.username(), u.displayName(), u.passwordHash(),
+                u.passwordSalt(), u.passwordIterations(), current.role(), current.createdAt()));
+    }
 }

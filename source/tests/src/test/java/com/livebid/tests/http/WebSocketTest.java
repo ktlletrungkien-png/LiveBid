@@ -13,6 +13,7 @@ import com.livebid.common.dto.Role;
 import com.livebid.common.payload.AuctionIdPayload;
 import com.livebid.common.payload.AuthPayload;
 import com.livebid.common.payload.PlaceBidPayload;
+import com.livebid.common.payload.UpdateProfilePayload;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.JsonCodec;
 import com.livebid.common.protocol.Message;
@@ -144,6 +145,21 @@ class WebSocketTest {
 
         assertFalse(response.isSuccess());
         assertEquals(ErrorCode.UNAUTHORIZED, response.error().code());
+    }
+
+    @Test
+    void updateProfileOverWebSocket() throws Exception {
+        TestClient anonymous = connect();
+        Message denied = anonymous.request(MessageType.UPDATE_PROFILE, new UpdateProfilePayload("X", null, null));
+        assertFalse(denied.isSuccess());
+        assertEquals(ErrorCode.UNAUTHORIZED, denied.error().code());
+
+        TestClient client = connectAuthenticated("hoe_ws");
+        Message response = client.request(MessageType.UPDATE_PROFILE,
+                new UpdateProfilePayload("Cao Công Hoè", null, null));
+
+        assertTrue(response.isSuccess(), "UPDATE_PROFILE phải thành công: " + response.error());
+        assertEquals("Cao Công Hoè", response.payload().getAsJsonObject().get("displayName").getAsString());
     }
 
     @Test
