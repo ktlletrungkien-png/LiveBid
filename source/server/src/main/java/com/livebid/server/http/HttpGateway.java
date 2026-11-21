@@ -77,6 +77,10 @@ public final class HttpGateway implements AutoCloseable {
     private record UpdateBody(long expectedVersion, AuctionDraft draft) {
     }
 
+    /** Body của {@code POST /api/auctions/{id}/reject}. */
+    private record RejectBody(String reason) {
+    }
+
     private final Settings settings;
     private final AuthService auth;
     private final AuctionService auctions;
@@ -172,9 +176,14 @@ public final class HttpGateway implements AutoCloseable {
         app.get("/api/me", this::me);
         app.get("/api/me/auctions", this::myAuctions);
         app.get("/api/auctions", this::listAuctions);
+        // Khai báo /pending trước /{id} để Javalin không hiểu nhầm "pending" là mã phiên.
+        app.get("/api/auctions/pending", this::pendingAuctions);
         app.post("/api/auctions", this::createAuction);
         app.get("/api/auctions/{id}", this::getAuction);
         app.put("/api/auctions/{id}", this::updateAuction);
+        app.delete("/api/auctions/{id}", this::cancelAuction);
+        app.post("/api/auctions/{id}/approve", this::approveAuction);
+        app.post("/api/auctions/{id}/reject", this::rejectAuction);
         app.get("/api/auctions/{id}/bids", this::bidHistory);
         app.get("/api/stats", this::stats);
 
@@ -280,7 +289,7 @@ public final class HttpGateway implements AutoCloseable {
     }
 
     private void getAuction(Context ctx) {
-        respond(ctx, 200, auctions.getAuction(auctionId(ctx)));
+        respond(ctx, 200, auctions.getAuction(principal(ctx), auctionId(ctx)));
     }
 
     private void bidHistory(Context ctx) {
@@ -293,7 +302,7 @@ public final class HttpGateway implements AutoCloseable {
     private void myAuctions(Context ctx) {
         MyAuctionFilter filter = enumParam(ctx, "filter", MyAuctionFilter.class);
         if (filter == null) {
-            throw validation("Thiếu tham số filter (participated hoặc won)");
+            throw validation("Thiếu tham số filter (participated, won hoặc created)");
         }
         respond(ctx, 200, auctions.getMyAuctions(principal(ctx), filter));
     }
@@ -307,6 +316,23 @@ public final class HttpGateway implements AutoCloseable {
         long id = auctionId(ctx);
         UpdateBody body = body(ctx, UpdateBody.class);
         respond(ctx, 200, auctions.updateAuction(principal(ctx), id, body.expectedVersion(), body.draft()));
+    }
+
+    private void cancelAuction(Context ctx) {
+        respond(ctx, 204, auctions.cancelAuction(principal(ctx), auctionId(ctx)));
+    }
+
+    private void pendingAuctions(Context ctx) {
+        respond(ctx, 200, auctions.getPendingAuctions(principal(ctx)));
+    }
+
+    private void approveAuction(Context ctx) {
+        respond(ctx, 200, auctions.approveAuction(principal(ctx), auctionId(ctx)));
+    }
+
+    private void rejectAuction(Context ctx) {
+        RejectBody body = body(ctx, RejectBody.class);
+        respond(ctx, 200, auctions.rejectAuction(principal(ctx), auctionId(ctx), body.reason()));
     }
 
     private void stats(Context ctx) {
@@ -403,6 +429,10 @@ public final class HttpGateway implements AutoCloseable {
     }
 
     private static void respondNow(Context ctx, int status, Object value) {
+        if (status == 204) {
+            ctx.status(204);
+            return;
+        }
         ctx.status(status).contentType(JSON).result(JsonCodec.gson().toJson(value));
     }
 

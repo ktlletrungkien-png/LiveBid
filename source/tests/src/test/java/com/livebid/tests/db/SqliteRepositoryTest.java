@@ -72,7 +72,7 @@ class SqliteRepositoryTest {
         db = SqliteDatabase.open(dir.resolve("test.db"));
 
         assertEquals(1, scalar("SELECT COUNT(*) FROM schema_version"));
-        assertEquals(1, scalar("SELECT version FROM schema_version"));
+        assertEquals(2, scalar("SELECT version FROM schema_version"));
         for (String table : List.of("users", "auctions", "bids", "settlement_queue")) {
             assertEquals(1, scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '" + table + "'"),
                     "thiếu bảng " + table);
@@ -249,6 +249,84 @@ class SqliteRepositoryTest {
         long userId = users.insert(newUser("nguoi", Role.USER)).id();
 
         assertThrows(DataAccessException.class, () -> bids.insert(424242L, userId, 1000, 1L, "fk"));
+    }
+
+    // 9. Migration V1 -> V2 & hàm mới cho duyệt phiên
+
+    @Test
+    void migratesV1DatabaseWithExistingDataToV2() throws Exception {
+        Path v1Path = dir.resolve("v1_legacy.db");
+        try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + v1Path);
+             Statement st = conn.createStatement()) {
+            st.execute("PRAGMA foreign_keys = ON");
+            st.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)");
+            for (String sql : SqliteDatabase.readStatements("db/V1__init.sql")) {
+                st.execute(sql);
+            }
+            st.execute("INSERT INTO schema_version (version) VALUES (1)");
+            st.execute("INSERT INTO users (id, username, display_name, password_hash, password_salt, "
+                    + "password_iterations, role, created_at) VALUES (1, 'admin', 'Admin', 'h', 's', 1000, 'ADMIN', 1)");
+            st.execute("INSERT INTO users (id, username, display_name, password_hash, password_salt, "
+                    + "password_iterations, role, created_at) VALUES (2, 'an', 'An', 'h', 's', 1000, 'USER', 1)");
+            st.execute("INSERT INTO auctions (id, title, description, starting_price, min_increment, current_price, "
+                    + "current_bidder_id, winner_id, starts_at, ends_at, extension_count, status, version, "
+                    + "created_by, created_at) VALUES (10, 'Phiên cũ', 'Mô tả', 1000, 100, 1100, 2, 2, "
+                    + "100, 200, 0, 'FINISHED', 2, 1, 50)");
+            st.execute("INSERT INTO bids (id, auction_id, user_id, amount, accepted_at, request_id) "
+                    + "VALUES (20, 10, 2, 1100, 150, 'req-1')");
+            st.execute("INSERT INTO settlement_queue (id, auction_id, status, attempts) VALUES (30, 10, 'DONE', 1)");
+        }
+
+        try (SqliteDatabase migrated = SqliteDatabase.open(v1Path)) {
+            var repo = new SqliteAuctionRepository(migrated);
+            Auction old = repo.findById(10).orElseThrow();
+            assertEquals("Phiên cũ", old.title());
+            assertEquals(AuctionStatus.FINISHED, old.status());
+            assertNull(old.rejectReason());
+
+            Auction pending = repo.insert(new NewAuction("Phiên mới", "", 2000, 100, 300, 400, 2, 60,
+                    AuctionStatus.PENDING_APPROVAL));
+            assertEquals(AuctionStatus.PENDING_APPROVAL, repo.findById(pending.id()).orElseThrow().status());
+
+            try (Statement st = migrated.connection().createStatement();
+                 ResultSet rs = st.executeQuery("SELECT version FROM schema_version")) {
+                rs.next();
+                assertEquals(2, rs.getInt(1));
+            }
+        }
+
+        // Mở lần hai không chạy lại V2
+        try (SqliteDatabase reopened = SqliteDatabase.open(v1Path);
+             Statement st = reopened.connection().createStatement();
+             ResultSet rs = st.executeQuery("SELECT COUNT(*), MAX(version) FROM schema_version")) {
+            rs.next();
+            assertEquals(1, rs.getInt(1));
+            assertEquals(2, rs.getInt(2));
+        }
+    }
+
+    @Test
+    void approvalQueriesAndDeleteIfPendingBehaveConsistently() {
+        long adminId = users.insert(newUser("admin", Role.ADMIN)).id();
+        long aliceId = users.insert(newUser("alice", Role.USER)).id();
+
+        Auction p1 = auctions.insert(new NewAuction("Chờ 1", "", 1000, 100, 2000, 3000, aliceId, 10,
+                AuctionStatus.PENDING_APPROVAL));
+        Auction p2 = auctions.insert(new NewAuction("Chờ 2", "", 1000, 100, 2000, 3000, aliceId, 20,
+                AuctionStatus.PENDING_APPROVAL));
+        Auction pub = auctions.insert(new NewAuction("Công khai", "", 1000, 100, 1000, 3000, adminId, 30,
+                AuctionStatus.SCHEDULED));
+
+        assertEquals(List.of(pub.id()), ids(auctions.findPublicPage(null, 0, 10)));
+        assertTrue(auctions.findPublicPage(AuctionStatus.PENDING_APPROVAL, 0, 10).isEmpty());
+        assertEquals(List.of(p1.id(), p2.id()), ids(auctions.findPendingApproval()));
+        assertEquals(List.of(p2.id(), p1.id()), ids(auctions.findCreatedBy(aliceId)));
+        assertEquals(2, auctions.countPendingBy(aliceId));
+
+        assertTrue(auctions.deleteIfPending(p1.id()));
+        assertFalse(auctions.deleteIfPending(p1.id()));
+        assertFalse(auctions.deleteIfPending(pub.id()));
+        assertEquals(1, auctions.countPendingBy(aliceId));
     }
 
     // Tiện ích

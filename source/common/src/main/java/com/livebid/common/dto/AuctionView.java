@@ -11,6 +11,10 @@ package com.livebid.common.dto;
  * @param leaderDisplayName người đang dẫn đầu; null nếu chưa có bid
  * @param winnerDisplayName chỉ có khi FINISHED và có người thắng
  * @param serverTime        giờ server lúc tạo bản này (epoch ms UTC)
+ * @param ownerId           mã người tạo phiên ({@code created_by})
+ * @param ownerDisplayName  tên hiển thị của người tạo phiên
+ * @param ownerRole         vai trò người tạo ({@code ADMIN} → giao diện hiển thị "Ban tổ chức")
+ * @param rejectReason      lý do từ chối khi {@code REJECTED}; chỉ trả cho chủ phiên và ADMIN
  */
 public record AuctionView(
         long auctionId,
@@ -27,7 +31,11 @@ public record AuctionView(
         long endsAt,
         int extensionCount,
         long version,
-        long serverTime) {
+        long serverTime,
+        long ownerId,
+        String ownerDisplayName,
+        Role ownerRole,
+        String rejectReason) {
 
     /** Mức giá thấp nhất được chấp nhận cho bid tiếp theo. */
     public long minimumNextBid() {

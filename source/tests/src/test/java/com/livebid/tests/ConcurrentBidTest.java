@@ -106,7 +106,7 @@ class ConcurrentBidTest {
             expectedPrice = amount;
         }
 
-        AuctionView finalState = service.getAuction(auctionId).join();
+        AuctionView finalState = service.getAuction(admin, auctionId).join();
         assertEquals(expectedPrice, finalState.currentPrice());
         assertEquals(ROUNDS, bids.countByAuction(auctionId), "không có bid thừa nào được ghi");
 

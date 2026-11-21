@@ -35,7 +35,8 @@ class UdpAnnouncerTest {
     private static AuctionView auction(long auctionId, String title, long startsAt) {
         return new AuctionView(auctionId, title, "Mô tả", AuctionStatus.SCHEDULED,
                 100_000L, 10_000L, 100_000L, false, null, null,
-                startsAt, startsAt + 300_000L, 0, 1L, startsAt);
+                startsAt, startsAt + 300_000L, 0, 1L, startsAt,
+                1L, "Ban tổ chức", com.livebid.common.dto.Role.ADMIN, null);
     }
 
     @Test

@@ -3,19 +3,176 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveBid</title>
+    <title>LiveBid – Đấu giá trực tuyến</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Chỉ bố cục và vài chi tiết bổ sung; màu, chữ, nút, thẻ, tag dùng lại biến/class của style.css */
+        * { box-sizing: border-box; }
+        body { font-weight: 400; }
+        h1, h2, h3 { font-weight: 500; margin-top: 0; }
+        .sub { color: var(--ink-secondary); }
+        .hidden, [hidden] { display: none !important; }
+
+        /* Header phẳng (không floating) */
+        .site-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-md) var(--sp-xl);
+            background: var(--canvas); border-bottom: 1px solid var(--hairline); padding: var(--sp-md) var(--sp-xl); }
+        .site-header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+        .brand { display: inline-flex; align-items: center; gap: var(--sp-sm); color: var(--ink); letter-spacing: -0.3px; }
+        .brand::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px var(--primary-subdued); }
+        #nav { display: flex; gap: var(--sp-xs); flex-wrap: wrap; flex: 1; }
+        #nav a { color: var(--ink-secondary); padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-pill); font-size: 14px; }
+        #nav a:hover { background: var(--canvas-soft); }
+        #nav a[aria-current="page"] { background: var(--primary-subdued); color: var(--primary-deep); font-weight: 600; }
+        #user-box { display: flex; align-items: center; gap: var(--sp-sm); flex-wrap: wrap; }
+        #user-box .btn-secondary { padding: 8px 14px; font-size: 14px; }
+        .mock-note { text-align: center; padding: var(--sp-xs) var(--sp-lg); background: var(--canvas); border-bottom: 1px solid var(--hairline); font-size: 13px; color: var(--ink-secondary); }
+
+        .container { max-width: 1100px; margin: 0 auto; padding: var(--sp-xxl) var(--sp-xl); }
+        .row { display: flex; align-items: center; gap: var(--sp-sm); flex-wrap: wrap; }
+        .row-between { justify-content: space-between; }
+        .stack { display: flex; flex-direction: column; gap: var(--sp-md); }
+        .page-head { margin-bottom: var(--sp-xl); }
+        .page-head h2 { font-size: 28px; margin: 0 0 var(--sp-xs); }
+        .empty { text-align: center; padding: var(--sp-xxl); }
+
+        /* Biểu mẫu */
+        .field { display: flex; flex-direction: column; gap: var(--sp-xs); }
+        .field label { font-size: 13px; font-weight: 500; color: var(--ink); }
+        .field input, .field textarea { width: 100%; min-height: 44px; font-weight: 400; }
+        textarea { background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline-input); border-radius: var(--r-sm);
+            padding: var(--sp-sm) var(--sp-md); font: 400 15px var(--font); resize: vertical; }
+        textarea:focus { outline: none; border-color: var(--primary); }
+        .field[data-invalid] input, .field[data-invalid] textarea { border-color: var(--ruby); }
+        .field-error { color: var(--ruby); font-size: 13px; margin: 0; }
+        .field-error:empty { display: none; }
+        .form-error { color: var(--ruby); font-size: 14px; margin: 0; }
+        .form-error:empty { display: none; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-lg); }
+        .form-grid .full { grid-column: 1 / -1; }
+        .form-card { max-width: 720px; }
+
+        /* Đăng nhập */
+        .auth-wrap { display: grid; grid-template-columns: 1.1fr 1fr; gap: 64px; align-items: center; min-height: 60vh; }
+        .hero h2 { font-size: 40px; line-height: 1.12; letter-spacing: -1px; margin: 0 0 var(--sp-lg); }
+        .hero p { font-size: 16px; margin: 0 0 var(--sp-xl); max-width: 460px; }
+        .points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-md); color: var(--ink-secondary); }
+        .points li { display: flex; align-items: center; gap: var(--sp-md); }
+        .points li::before { content: "✓"; display: inline-flex; align-items: center; justify-content: center; flex: none;
+            width: 22px; height: 22px; border-radius: 50%; background: var(--primary-subdued); color: var(--primary-deep); font-size: 12px; }
+        .auth { width: 100%; max-width: 440px; justify-self: end; box-shadow: var(--shadow-2); }
+        .auth h2 { margin: 0 0 var(--sp-xs); }
+        .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: var(--sp-lg) 0 var(--sp-xl);
+            background: var(--canvas-soft); border: 1px solid var(--hairline); border-radius: var(--r-pill); }
+        .segmented button, .pills button { border: none; border-radius: var(--r-pill); font: 400 14px/1 var(--font); cursor: pointer; background: transparent; color: var(--ink-secondary); }
+        .segmented button { padding: 10px 0; }
+        .segmented button[aria-pressed="true"] { background: var(--canvas); color: var(--primary); box-shadow: var(--shadow-1); font-weight: 600; }
+        .demo-accounts { margin-top: var(--sp-lg); padding-top: var(--sp-lg); border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink-secondary); }
+        .link-btn { background: none; border: none; padding: 0; color: var(--primary); font: 400 13px var(--font); cursor: pointer; text-decoration: underline; }
+
+        /* Bộ lọc dạng pill (nút tím chính chỉ dành cho hành động) */
+        .pills { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
+        .pills button { padding: 9px 16px; border: 1px solid var(--hairline); background: var(--canvas); }
+        .pills button[aria-pressed="true"] { background: var(--primary-subdued); border-color: var(--primary-subdued); color: var(--primary-deep); font-weight: 600; }
+        .btn-small { padding: 8px 14px !important; font-size: 14px !important; }
+
+        /* Lưới phiên */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--sp-xl); }
+        .auction { display: flex; flex-direction: column; gap: var(--sp-md); padding: var(--sp-xl); transition: box-shadow .15s, transform .15s; }
+        .auction:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+        .auction h3 { margin: 0; font-size: 18px; }
+        .auction .price { font-size: 26px; font-weight: 500; color: var(--ink); letter-spacing: -0.26px; margin: 0; }
+        .meta { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-sm); }
+        .urgent { color: var(--ruby); }
+        .auction .spacer { flex: 1; }
+        .pager { display: flex; align-items: center; justify-content: center; gap: var(--sp-lg); margin-top: var(--sp-xl); }
+        .tag { font-weight: 600; padding: 5px 10px; }
+        .tag-warn { background: rgba(155, 104, 41, 0.14); color: var(--warning); }
+        .tag-reject { background: rgba(234, 34, 97, 0.12); color: var(--ruby); }
+        .tag-win { background: rgba(21, 128, 61, 0.12); color: var(--success); }
+
+        /* Phòng đấu giá */
+        .room-main { display: flex; flex-direction: column; gap: var(--sp-xl); min-width: 0; }
+        .room-main h2 { font-size: 28px; margin: var(--sp-sm) 0; }
+        .desc { white-space: pre-wrap; color: var(--ink-secondary); margin: var(--sp-md) 0 var(--sp-xl); }
+        .facts { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-lg); margin: 0; }
+        .facts dt { font-size: 13px; color: var(--ink-secondary); }
+        .facts dd { margin: 2px 0 0; font-size: 18px; }
+        .side-stack { display: flex; flex-direction: column; gap: var(--sp-md); }
+        .big-price { font-size: 44px; font-weight: 500; line-height: 1.05; letter-spacing: -1px; margin: 0; padding: 2px 6px; border-radius: var(--r-sm); }
+        .on-dark-mute { color: rgba(255, 255, 255, 0.72); font-size: 13px; }
+        .big-timer { font-size: 30px; font-weight: 500; margin: 0; }
+        .card-featured .field label { color: rgba(255, 255, 255, 0.85); }
+        .card-featured .btn-primary { width: 100%; min-height: 46px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); }
+        .conn { display: flex; align-items: center; gap: var(--sp-sm); font-size: 13px; color: rgba(255, 255, 255, 0.85); }
+        .dot { width: 9px; height: 9px; border-radius: 50%; background: #3ecf8e; flex: none; }
+        .dot[data-off] { background: var(--ruby); }
+        .conn .link-btn { color: #fff; margin-left: auto; }
+        .side-note { margin: 0; padding: var(--sp-md); border-radius: var(--r-md); background: rgba(255, 255, 255, 0.1); }
+        .notices { display: flex; flex-direction: column; gap: var(--sp-sm); }
+        .notices p { margin: 0; padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-md); background: var(--canvas); color: var(--ink); font-size: 14px; }
+        .notices .warn { color: var(--warning); font-weight: 600; }
+        .notices .bad { color: var(--ruby); font-weight: 600; }
+        .notices .good { color: var(--success); font-weight: 600; }
+
+        /* Bảng */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; font-weight: 500; font-size: 13px; color: var(--ink-secondary); border-bottom: 1px solid var(--hairline); padding: var(--sp-sm) var(--sp-md); white-space: nowrap; }
+        td { padding: var(--sp-md); border-bottom: 1px solid var(--hairline); vertical-align: top; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        tbody tr:last-child td { border-bottom: none; }
+        .actions { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
+
+        /* Phiên của tôi */
+        .items { display: flex; flex-direction: column; gap: var(--sp-lg); }
+        .item { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-lg); align-items: center; padding: var(--sp-xl); }
+        .item h3 { margin: var(--sp-sm) 0 var(--sp-xs); font-size: 18px; }
+        .item h3 a { color: var(--ink); }
+        .item-side { text-align: right; display: flex; flex-direction: column; gap: var(--sp-sm); align-items: flex-end; }
+        .reason { margin: var(--sp-sm) 0 0; color: var(--ruby); font-size: 14px; }
+
+        /* Thống kê */
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-lg); margin-bottom: var(--sp-xl); }
+        .stat { padding: var(--sp-xl); }
+        .stat .value { font-size: 28px; font-weight: 500; margin: var(--sp-xs) 0 0; }
+
+        /* Hộp thoại + toast */
+        dialog { border: none; border-radius: var(--r-lg); padding: var(--sp-xxl); width: min(560px, calc(100vw - 32px)); max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-2); color: var(--ink); }
+        dialog::backdrop { background: rgba(13, 37, 61, 0.45); }
+        .dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-sm); margin-top: var(--sp-xl); }
+        #toasts { position: fixed; right: var(--sp-xl); bottom: var(--sp-xl); display: flex; flex-direction: column; gap: var(--sp-sm); z-index: 10; max-width: calc(100vw - 32px); }
+        .toast { background: var(--brand-dark); color: var(--on-primary); border-radius: var(--r-md); padding: var(--sp-md) var(--sp-lg); box-shadow: var(--shadow-2); }
+
+        :is(.btn-primary, .btn-secondary, button, a):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+        @media (max-width: 860px) {
+            .auth-wrap { grid-template-columns: 1fr; gap: var(--sp-xl); min-height: 0; }
+            .auth { justify-self: stretch; max-width: none; }
+            .hero h2 { font-size: 30px; }
+        }
+        @media (max-width: 767px) {
+            .container { padding: var(--sp-lg); }
+            .card { padding: var(--sp-xl); }
+            .form-grid { grid-template-columns: 1fr; }
+            .big-price { font-size: 36px; }
+            .item { grid-template-columns: 1fr; }
+            .item-side { text-align: left; align-items: flex-start; }
+            .site-header { padding: var(--sp-md) var(--sp-lg); }
+            dialog { padding: var(--sp-xl); }
+        }
+    </style>
 </head>
 <body>
     <header class="site-header">
-        <h1><a href="#/auctions">LiveBid</a></h1>
+        <h1><a class="brand" href="#/auctions">LiveBid</a></h1>
         <nav id="nav" aria-label="Điều hướng chính"></nav>
         <div id="user-box"></div>
     </header>
-    <main id="app">
+    <main id="app" class="container">
         <noscript>Trang này cần bật JavaScript.</noscript>
     </main>
     <div id="toasts" aria-live="polite"></div>
-    <script type="module" src="app.js"></script>
+    <script src="api.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@ import com.livebid.common.payload.BidHistoryPayload;
 import com.livebid.common.payload.ListAuctionsPayload;
 import com.livebid.common.payload.MyAuctionsPayload;
 import com.livebid.common.payload.PlaceBidPayload;
+import com.livebid.common.payload.RejectAuctionPayload;
 import com.livebid.common.payload.UpdateAuctionPayload;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.Message;
@@ -54,6 +55,10 @@ public final class AuctionCommands {
         router.register(MessageType.PLACE_BID, this::placeBid);
         router.register(MessageType.CREATE_AUCTION, this::createAuction);
         router.register(MessageType.UPDATE_AUCTION, this::updateAuction);
+        router.register(MessageType.CANCEL_AUCTION, this::cancelAuction);
+        router.register(MessageType.GET_PENDING_AUCTIONS, this::getPendingAuctions);
+        router.register(MessageType.APPROVE_AUCTION, this::approveAuction);
+        router.register(MessageType.REJECT_AUCTION, this::rejectAuction);
     }
 
     // ---------------------------------------------------------------- tra cứu
@@ -70,8 +75,8 @@ public final class AuctionCommands {
 
     private CompletableFuture<AuctionView> getAuction(ClientChannel session, Message request)
             throws ProtocolException {
-        requireLogin(session);
-        return auctions.getAuction(payload(request, AuctionIdPayload.class).auctionId());
+        UserPrincipal viewer = requireLogin(session);
+        return auctions.getAuction(viewer, payload(request, AuctionIdPayload.class).auctionId());
     }
 
     private CompletableFuture<List<BidView>> getBidHistory(ClientChannel session, Message request)
@@ -116,21 +121,45 @@ public final class AuctionCommands {
         return auctions.placeBid(user, session, p.auctionId(), p.amount(), request.requestId());
     }
 
-    // ---------------------------------------------------------------- quản trị (ADMIN)
+    // ---------------------------------------------------------------- tạo, sửa, hủy & kiểm duyệt
 
     private CompletableFuture<AuctionView> createAuction(ClientChannel session, Message request)
             throws ProtocolException {
-        UserPrincipal admin = requireAdmin(session);
-        return auctions.createAuction(admin, payload(request, AuctionDraft.class));
+        UserPrincipal user = requireLogin(session);
+        return auctions.createAuction(user, payload(request, AuctionDraft.class));
     }
 
     private CompletableFuture<AuctionView> updateAuction(ClientChannel session, Message request)
             throws ProtocolException {
-        UserPrincipal admin = requireAdmin(session);
+        UserPrincipal user = requireLogin(session);
         UpdateAuctionPayload p = payload(request, UpdateAuctionPayload.class);
         if (p.draft() == null) {
             throw new ProtocolException(ErrorCode.INVALID_MESSAGE, "Thiếu draft trong UPDATE_AUCTION");
         }
-        return auctions.updateAuction(admin, p.auctionId(), p.expectedVersion(), p.draft());
+        return auctions.updateAuction(user, p.auctionId(), p.expectedVersion(), p.draft());
+    }
+
+    private CompletableFuture<Void> cancelAuction(ClientChannel session, Message request)
+            throws ProtocolException {
+        UserPrincipal user = requireLogin(session);
+        return auctions.cancelAuction(user, payload(request, AuctionIdPayload.class).auctionId());
+    }
+
+    private CompletableFuture<List<AuctionView>> getPendingAuctions(ClientChannel session, Message request)
+            throws ProtocolException {
+        return auctions.getPendingAuctions(requireAdmin(session));
+    }
+
+    private CompletableFuture<AuctionView> approveAuction(ClientChannel session, Message request)
+            throws ProtocolException {
+        return auctions.approveAuction(requireAdmin(session),
+                payload(request, AuctionIdPayload.class).auctionId());
+    }
+
+    private CompletableFuture<AuctionView> rejectAuction(ClientChannel session, Message request)
+            throws ProtocolException {
+        UserPrincipal admin = requireAdmin(session);
+        RejectAuctionPayload p = payload(request, RejectAuctionPayload.class);
+        return auctions.rejectAuction(admin, p.auctionId(), p.reason());
     }
 }

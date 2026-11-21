@@ -200,7 +200,8 @@ class SettlementClientTest {
     /** {@link SettlementClient} chỉ dùng {@code auctionId}; các trường khác giữ cho giống dữ liệu thật. */
     private static AuctionView view(long auctionId) {
         return new AuctionView(auctionId, "Bàn phím cơ", "", AuctionStatus.FINISHED, START_PRICE, STEP,
-                START_PRICE, false, null, null, NOW - 60_000, NOW + 60_000, 0, 1, NOW);
+                START_PRICE, false, null, null, NOW - 60_000, NOW + 60_000, 0, 1, NOW,
+                1L, "Ban tổ chức", Role.ADMIN, null);
     }
 
     private SettlementClient newClient(SettlementServiceLocator locator) {
