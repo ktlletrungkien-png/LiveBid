@@ -102,6 +102,60 @@ public final class AuthServiceImpl implements AuthService, AutoCloseable {
     }
 
     @Override
+    public CompletableFuture<UserPrincipal> updateProfile(UserPrincipal principal, String displayName,
+                                                          String currentPassword, String newPassword) {
+        String display = displayName == null ? "" : displayName.trim();
+        if (display.isEmpty() || display.length() > MAX_DISPLAY_NAME || containsControlChar(display)) {
+            return failed(new ServiceException(ErrorCode.VALIDATION_ERROR,
+                    "Tên hiển thị phải từ 1 đến 50 ký tự và không chứa ký tự điều khiển"));
+        }
+        boolean changePassword = newPassword != null && !newPassword.isEmpty();
+        if (changePassword && (newPassword.length() < MIN_PASSWORD || newPassword.length() > MAX_PASSWORD)) {
+            return failed(new ServiceException(ErrorCode.VALIDATION_ERROR, "Mật khẩu mới phải có từ 8 đến 128 ký tự"));
+        }
+        if (changePassword && (currentPassword == null || currentPassword.isEmpty())) {
+            return failed(new ServiceException(ErrorCode.VALIDATION_ERROR, "Vui lòng nhập mật khẩu hiện tại"));
+        }
+
+        long id = principal.userId();
+        if (!changePassword) {
+            return executor.submit(() -> applyProfile(principal, display, null));
+        }
+        // Đọc user (executor) -> kiểm tra mật khẩu hiện tại (pool băm) -> băm mật khẩu mới (pool băm) -> ghi DB (executor).
+        return executor.submit(() -> users.findById(id))
+                .thenComposeAsync(found -> CompletableFuture.supplyAsync(() -> {
+                    char[] chars = currentPassword.toCharArray();
+                    try {
+                        User user = found.orElseThrow(AuthServiceImpl::invalidCredentials);
+                        if (!hasher.verify(chars, user.passwordHash(), user.passwordSalt(), user.passwordIterations())) {
+                            throw new ServiceException(ErrorCode.VALIDATION_ERROR, "Mật khẩu hiện tại không đúng");
+                        }
+                        return user;
+                    } finally {
+                        Arrays.fill(chars, '\0');
+                    }
+                }, hashPool), hashPool)
+                .thenComposeAsync(user -> hashAsync(newPassword), hashPool)
+                .thenComposeAsync(hashed -> executor.submit(() -> applyProfile(principal, display, hashed)), hashPool);
+    }
+
+    /** Chạy trên executor: ghi tên (và mật khẩu nếu có), rồi cập nhật tên trong các token đang dùng. */
+    private UserPrincipal applyProfile(UserPrincipal principal, String display, HashedPassword hashed) {
+        try {
+            users.updateDisplayName(principal.userId(), display);
+            if (hashed != null) {
+                users.updatePassword(principal.userId(), hashed.hash(), hashed.salt(), hashed.iterations());
+            }
+        } catch (DataAccessException e) {
+            log.error("Không cập nhật được hồ sơ người dùng {}", principal.userId(), e);
+            throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Lỗi cơ sở dữ liệu, thử lại sau");
+        }
+        UserPrincipal updated = new UserPrincipal(principal.userId(), principal.username(), display, principal.role());
+        tokens.replaceAll((token, p) -> p.userId() == updated.userId() ? updated : p);
+        return updated;
+    }
+
+    @Override
     public String issueToken(UserPrincipal user) {
         byte[] bytes = new byte[TOKEN_BYTES];
         random.nextBytes(bytes);

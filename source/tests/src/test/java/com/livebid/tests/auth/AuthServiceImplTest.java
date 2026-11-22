@@ -60,6 +60,38 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void updateProfileChangesNameAndPassword() throws Exception {
+        UserPrincipal p = await(auth.register("doi_mk", "matkhaucu1", "Tên cũ"));
+        String token = auth.issueToken(p);
+
+        UserPrincipal updated = await(auth.updateProfile(p, "  Tên mới ", "matkhaucu1", "matkhaumoi2"));
+
+        assertEquals("Tên mới", updated.displayName());
+        assertEquals("Tên mới", auth.resolveToken(token).orElseThrow().displayName(), "token phải thấy tên mới");
+        assertEquals(ErrorCode.INVALID_CREDENTIALS, failureOf(auth.login("doi_mk", "matkhaucu1")).code());
+        assertEquals("Tên mới", await(auth.login("doi_mk", "matkhaumoi2")).displayName());
+    }
+
+    @Test
+    void updateProfileRejectsWrongCurrentPasswordAndKeepsOldOne() throws Exception {
+        UserPrincipal p = await(auth.register("sai_mk", "matkhaucu1", "Tên"));
+
+        assertEquals(ErrorCode.VALIDATION_ERROR,
+                failureOf(auth.updateProfile(p, "Tên", "saimatkhau", "matkhaumoi2")).code());
+        assertEquals(ErrorCode.VALIDATION_ERROR,
+                failureOf(auth.updateProfile(p, "Tên", "matkhaucu1", "ngan")).code(), "mật khẩu mới quá ngắn");
+        await(auth.login("sai_mk", "matkhaucu1"));
+    }
+
+    @Test
+    void updateProfileWithoutPasswordOnlyRenames() throws Exception {
+        UserPrincipal p = await(auth.register("chi_ten", "matkhaucu1", "Tên"));
+
+        assertEquals("Tên khác", await(auth.updateProfile(p, "Tên khác", "", null)).displayName());
+        await(auth.login("chi_ten", "matkhaucu1"));
+    }
+
+    @Test
     void registerWithSameNameDifferentCaseIsTaken() throws Exception {
         await(auth.register("abc_user", "matkhau123", "Một"));
 
