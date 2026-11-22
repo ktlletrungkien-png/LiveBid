@@ -30,17 +30,19 @@ final class ConnectPanel extends JPanel {
     private final MainFrame mainFrame;
     private final ClientConfig config;
 
-    private final JTextField hostField = new JTextField(18);
-    private final JTextField portField = new JTextField(6);
-    private final JButton discoverButton = new JButton("Tìm server");
-    private final JButton connectButton = new JButton("Kết nối");
+    private final JTextField hostField = UiTheme.field(new JTextField(18));
+    private final JTextField portField = UiTheme.field(new JTextField(6));
+    private final JButton discoverButton = UiTheme.secondary("Tìm server");
+    private final JButton connectButton = UiTheme.primary("Kết nối");
     private final JLabel messageLabel = new JLabel(" ");
 
     ConnectPanel(MainFrame mainFrame, ClientConfig config) {
         this.mainFrame = mainFrame;
         this.config = config;
         setBorder(new EmptyBorder(24, 24, 24, 24));
+        setOpaque(false);
         setLayout(new GridBagLayout());
+        JPanel form = UiTheme.card(new GridBagLayout(), 32);
 
         hostField.setText(config.serverHost());
         portField.setText(Integer.toString(config.tcpPort()));
@@ -50,35 +52,40 @@ final class ConnectPanel extends JPanel {
         gbc.anchor = GridBagConstraints.LINE_START;
 
         JLabel title = new JLabel("Kết nối tới server LiveBid");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        title.setFont(UiTheme.sans(Font.BOLD, 22f));
+        title.setForeground(UiTheme.INK);
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 2;
-        add(title, gbc);
+        form.add(title, gbc);
 
         gbc.gridwidth = 1;
         gbc.gridy = 1;
-        add(new JLabel("Địa chỉ IP:"), gbc);
+        form.add(new JLabel("Địa chỉ IP:"), gbc);
         gbc.gridx = 1;
-        add(hostField, gbc);
+        form.add(hostField, gbc);
 
         gbc.gridx = 0;
         gbc.gridy = 2;
-        add(new JLabel("Cổng TCP:"), gbc);
+        form.add(new JLabel("Cổng TCP:"), gbc);
         gbc.gridx = 1;
-        add(portField, gbc);
+        form.add(portField, gbc);
 
         gbc.gridx = 0;
         gbc.gridy = 3;
         gbc.gridwidth = 2;
         JPanel buttons = new JPanel();
+        buttons.setOpaque(false);
         buttons.add(discoverButton);
         buttons.add(connectButton);
-        add(buttons, gbc);
+        form.add(buttons, gbc);
 
         gbc.gridy = 4;
-        messageLabel.setFont(messageLabel.getFont().deriveFont(Font.PLAIN));
-        add(messageLabel, gbc);
+        messageLabel.setFont(UiTheme.sans(Font.PLAIN, 13f));
+        messageLabel.setForeground(UiTheme.INK_SECONDARY);
+        form.add(messageLabel, gbc);
+
+        add(form, new GridBagConstraints());
 
         discoverButton.addActionListener(e -> discover());
         connectButton.addActionListener(e -> connect());

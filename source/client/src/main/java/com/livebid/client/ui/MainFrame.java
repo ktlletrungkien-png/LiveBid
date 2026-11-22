@@ -10,6 +10,7 @@ import com.livebid.common.dto.AuctionDraft;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.LoginResult;
+import com.livebid.common.dto.Role;
 import com.livebid.common.dto.UserView;
 import com.livebid.common.payload.LoginPayload;
 import com.livebid.common.payload.UpdateAuctionPayload;
@@ -23,6 +24,8 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
@@ -34,10 +37,15 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
+import javax.swing.JToggleButton;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JSeparator;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -85,6 +93,10 @@ public final class MainFrame extends JFrame {
     private final JLabel noticeLabel = new JLabel();
     private final JLabel userLabel = new JLabel();
     private final JButton reconnectButton = new JButton("Kết nối lại");
+    private final AvatarButton avatarButton = new AvatarButton();
+    private final JPanel topBar = new JPanel(new BorderLayout());
+    private final JPanel navPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+    private AuctionHubPanel.View activeView = AuctionHubPanel.View.LIST;
     private final Timer noticeTimer = new Timer(NOTICE_MILLIS, e -> noticeLabel.setText(""));
     private final Timer retryTimer = new Timer(0, e -> attemptReconnect());
     private final ReconnectPolicy reconnectPolicy = new ReconnectPolicy();
@@ -137,6 +149,7 @@ public final class MainFrame extends JFrame {
         connection.addEventListener(message -> SwingUtilities.invokeLater(() -> dispatchEvent(message)));
 
         cardPanel.add(new ConnectPanel(this, config), CARD_CONNECT);
+        add(buildTopBar(), BorderLayout.NORTH);
         add(cardPanel, BorderLayout.CENTER);
         add(buildStatusBar(), BorderLayout.SOUTH);
         showConnect();
@@ -175,6 +188,7 @@ public final class MainFrame extends JFrame {
         this.currentUser = user;
         rememberCredentials(username, password);
         userLabel.setText("Người dùng: " + user.displayName());
+        refreshUserBar();
         showList();
         startMulticast();
         setStatus("Đã đăng nhập: " + user.displayName());
@@ -188,12 +202,35 @@ public final class MainFrame extends JFrame {
         openRoomId = null;
         closeRoom();
         if (hubPanel == null) {
-            hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom,
-                    this::createAuction, this::editAuction);
+            hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom, this::editAuction);
             cardPanel.add(hubPanel, CARD_LIST);
+            hubPanel.show(activeView);
+        } else {
+            hubPanel.refresh();
         }
         cards.show(cardPanel, CARD_LIST);
-        hubPanel.refresh();
+        rebuildNav();
+    }
+
+    /** Chọn một màn hình của hub (từ thanh điều hướng): rời phòng đang mở rồi hiện màn hình đó. */
+    private void showView(AuctionHubPanel.View view) {
+        if (currentUser == null) {
+            return;
+        }
+        activeView = view;
+        RoomPanel room = roomPanel;
+        if (room != null) {
+            room.exit();
+        }
+        openRoomId = null;
+        closeRoom();
+        if (hubPanel == null) {
+            showList();
+            return;
+        }
+        cards.show(cardPanel, CARD_LIST);
+        hubPanel.show(view);
+        rebuildNav();
     }
 
     /** Mở phòng đấu giá của một phiên: gửi {@code JOIN_AUCTION} rồi hiện {@link RoomPanel}. Gọi trên EDT. */
@@ -210,13 +247,14 @@ public final class MainFrame extends JFrame {
         panel.join();
     }
 
-    /** Mở form tạo phiên rồi gửi {@code CREATE_AUCTION}. Gọi trên EDT. */
+    /** Mở form tạo phiên rồi gửi {@code CREATE_AUCTION}. USER: phiên chờ duyệt; ADMIN: lên lịch ngay. Gọi trên EDT. */
     private void createAuction() {
         if (!connection.isConnected()) {
             setStatus("Chưa kết nối tới server.");
             return;
         }
-        Optional<AuctionDraft> draft = AuctionFormDialog.showCreate(this, System.currentTimeMillis());
+        Optional<AuctionDraft> draft = AuctionFormDialog.showCreate(this, System.currentTimeMillis(),
+                currentUser.role());
         if (draft.isEmpty()) {
             return;
         }
@@ -227,10 +265,11 @@ public final class MainFrame extends JFrame {
                         setStatus("Không tạo được phiên: " + describeError(error));
                         return;
                     }
-                    setStatus("Đã tạo phiên #" + created.auctionId() + " «" + created.title() + "».");
-                    if (hubPanel != null) {
-                        hubPanel.refresh();
-                    }
+                    boolean pending = created.status() == AuctionStatus.PENDING_APPROVAL;
+                    setStatus(pending
+                            ? "Đã gửi phiên «" + created.title() + "», vui lòng chờ quản trị viên duyệt."
+                            : "Đã tạo phiên #" + created.auctionId() + " «" + created.title() + "».");
+                    showView(pending ? AuctionHubPanel.View.MINE : AuctionHubPanel.View.LIST);
                 }));
     }
 
@@ -240,7 +279,8 @@ public final class MainFrame extends JFrame {
             setStatus("Chưa kết nối tới server.");
             return;
         }
-        Optional<AuctionDraft> draft = AuctionFormDialog.showEdit(this, auction, System.currentTimeMillis());
+        Optional<AuctionDraft> draft = AuctionFormDialog.showEdit(this, auction, System.currentTimeMillis(),
+                currentUser.role());
         if (draft.isEmpty()) {
             return;
         }
@@ -453,6 +493,7 @@ public final class MainFrame extends JFrame {
                     reconnectButton.setVisible(false);
                     currentUser = result.user();
                     userLabel.setText("Người dùng: " + result.user().displayName());
+                    refreshUserBar();
                     setStatus("Đã kết nối lại: " + result.user().displayName());
                     if (openRoomId != null) {
                         openRoom(openRoomId);
@@ -475,6 +516,7 @@ public final class MainFrame extends JFrame {
         stopMulticast();
         closeRoom();
         if (hubPanel != null) {
+            hubPanel.close();
             cardPanel.remove(hubPanel);
             hubPanel = null;
         }
@@ -485,7 +527,199 @@ public final class MainFrame extends JFrame {
         currentUser = null;
         openRoomId = null;
         clearCredentials();
+        refreshUserBar();
         showConnect();
+    }
+
+    // ---- Thanh tài khoản (avatar) ----
+
+    private JPanel buildTopBar() {
+        topBar.setBackground(UiTheme.CANVAS);
+        topBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, UiTheme.HAIRLINE),
+                new EmptyBorder(10, 24, 10, 24)));
+
+        JPanel brandBox = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        brandBox.setOpaque(false);
+        JLabel dot = new JLabel() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected void paintComponent(java.awt.Graphics g) {
+                java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(UiTheme.PRIMARY_SUBDUED);
+                g2.fillOval(0, 0, 20, 20);
+                g2.setColor(UiTheme.PRIMARY);
+                g2.fillOval(3, 3, 14, 14);
+                g2.dispose();
+            }
+
+            @Override
+            public java.awt.Dimension getPreferredSize() {
+                return new java.awt.Dimension(20, 20);
+            }
+        };
+        JLabel brand = new JLabel("LiveBid");
+        brand.setFont(UiTheme.sans(Font.BOLD, 20f));
+        brand.setForeground(UiTheme.INK);
+        brandBox.add(dot);
+        brandBox.add(brand);
+
+        JPanel left = new JPanel(new BorderLayout(24, 0));
+        left.setOpaque(false);
+        left.add(brandBox, BorderLayout.WEST);
+        navPanel.setOpaque(false);
+        left.add(navPanel, BorderLayout.CENTER);
+
+        topBar.add(left, BorderLayout.WEST);
+        topBar.add(avatarButton, BorderLayout.EAST);
+        avatarButton.addActionListener(e -> showUserMenu());
+        topBar.setVisible(false);
+        return topBar;
+    }
+
+    /** Dựng lại các mục điều hướng theo vai trò, đánh dấu mục đang mở (giống menu trên web). */
+    private void rebuildNav() {
+        navPanel.removeAll();
+        if (currentUser == null) {
+            navPanel.revalidate();
+            return;
+        }
+        ButtonGroup group = new ButtonGroup();
+        navPanel.add(navItem(group, "Phiên đấu giá", AuctionHubPanel.View.LIST));
+        JToggleButton create = UiTheme.pillToggle("Đăng phiên");
+        create.addActionListener(e -> {
+            rebuildNav();
+            createAuction();
+        });
+        group.add(create);
+        navPanel.add(create);
+        navPanel.add(navItem(group, "Phiên của tôi", AuctionHubPanel.View.MINE));
+        if (currentUser.role() == Role.ADMIN) {
+            navPanel.add(navItem(group, "Quản trị", AuctionHubPanel.View.ADMIN));
+        }
+        navPanel.revalidate();
+        navPanel.repaint();
+    }
+
+    private JToggleButton navItem(ButtonGroup group, String label, AuctionHubPanel.View view) {
+        JToggleButton item = UiTheme.pillToggle(label);
+        item.setSelected(view == activeView);
+        item.addActionListener(e -> showView(view));
+        group.add(item);
+        return item;
+    }
+
+    /** Hiện thanh avatar khi đã đăng nhập, ẩn khi chưa; cập nhật chữ cái đầu theo tên hiển thị. */
+    private void refreshUserBar() {
+        topBar.setVisible(currentUser != null);
+        if (currentUser != null) {
+            avatarButton.setUserName(currentUser.displayName());
+            rebuildNav();
+        } else {
+            activeView = AuctionHubPanel.View.LIST;
+            rebuildNav();
+        }
+    }
+
+    /** Bấm avatar: menu có tên, "Thông tin cá nhân" và "Đăng xuất". */
+    private void showUserMenu() {
+        if (currentUser == null) {
+            return;
+        }
+        JPopupMenu menu = new JPopupMenu();
+        JLabel name = new JLabel(currentUser.displayName());
+        name.setFont(UiTheme.sans(Font.BOLD, 14f));
+        JLabel role = new JLabel(currentUser.role() == Role.ADMIN ? "Quản trị viên" : "Người dùng");
+        role.setForeground(UiTheme.INK_MUTE);
+        JPanel head = new JPanel(new GridLayout(2, 1));
+        head.setBorder(new EmptyBorder(8, 12, 8, 24));
+        head.setOpaque(false);
+        head.add(name);
+        head.add(role);
+        menu.add(head);
+        menu.add(new JSeparator());
+
+        JMenuItem profile = new JMenuItem("Thông tin cá nhân");
+        profile.addActionListener(e -> openProfile());
+        menu.add(profile);
+
+        JMenuItem logout = new JMenuItem("Đăng xuất");
+        logout.setForeground(UiTheme.RUBY);
+        logout.addActionListener(e -> logout());
+        menu.add(logout);
+
+        menu.show(avatarButton, avatarButton.getWidth() - menu.getPreferredSize().width, avatarButton.getHeight());
+    }
+
+    /** Mở hộp thoại sửa tên hiển thị / đổi mật khẩu. Gọi trên EDT. */
+    private void openProfile() {
+        if (currentUser == null) {
+            return;
+        }
+        if (!connection.isConnected()) {
+            setStatus("Chưa kết nối tới server.");
+            return;
+        }
+        ProfileDialog.show(this, currentUser,
+                payload -> connection.call(MessageType.UPDATE_PROFILE, payload, UserView.class),
+                this::onProfileSaved);
+    }
+
+    private void onProfileSaved(UserView updated, String newPassword) {
+        boolean renamed = currentUser == null || !updated.displayName().equals(currentUser.displayName());
+        currentUser = updated;
+        if (newPassword != null && savedUsername != null) {
+            rememberCredentials(savedUsername, newPassword); // để tự đăng nhập lại đúng mật khẩu mới
+        }
+        userLabel.setText("Người dùng: " + updated.displayName());
+        refreshUserBar();
+        if (renamed) {
+            // Các màn hình đang giữ bản UserView cũ (tên dùng để nhận ra "bạn đang dẫn đầu"); dựng lại cho đúng.
+            closeRoom();
+            if (hubPanel != null) {
+                hubPanel.close();
+            cardPanel.remove(hubPanel);
+                hubPanel = null;
+            }
+            showList();
+        }
+        setStatus("Đã cập nhật thông tin cá nhân.");
+    }
+
+    /** Đăng xuất: gửi LOGOUT, dọn màn hình phiên và quay lại màn hình đăng nhập (vẫn giữ kết nối TCP). */
+    private void logout() {
+        if (connection.isConnected()) {
+            connection.request(MessageType.LOGOUT, null);
+        }
+        retryTimer.stop();
+        reconnectPolicy.reset();
+        retryInProgress = false;
+        reconnectButton.setVisible(false);
+        stopMulticast();
+        closeRoom();
+        if (hubPanel != null) {
+            hubPanel.close();
+            cardPanel.remove(hubPanel);
+            hubPanel = null;
+        }
+        if (loginPanel != null) {
+            cardPanel.remove(loginPanel);
+            loginPanel = null;
+        }
+        currentUser = null;
+        openRoomId = null;
+        clearCredentials();
+        userLabel.setText("");
+        refreshUserBar();
+        if (connection.isConnected()) {
+            onConnected(lastHost, lastPort);
+            setStatus("Đã đăng xuất.");
+        } else {
+            resetToConnectScreen();
+        }
     }
 
     private void rememberCredentials(String username, String password) {
@@ -504,13 +738,20 @@ public final class MainFrame extends JFrame {
 
     private JPanel buildStatusBar() {
         JPanel bar = new JPanel(new BorderLayout(8, 0));
+        bar.setBackground(UiTheme.CANVAS);
         bar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
-                new EmptyBorder(6, 10, 6, 10)));
+                BorderFactory.createMatteBorder(1, 0, 0, 0, UiTheme.HAIRLINE),
+                new EmptyBorder(6, 24, 6, 24)));
+        for (JLabel label : new JLabel[] {statusLabel, noticeLabel, userLabel}) {
+            label.setFont(UiTheme.sans(Font.PLAIN, 12f));
+            label.setForeground(UiTheme.INK_SECONDARY);
+            label.setBorder(new EmptyBorder(0, 0, 0, 4));
+        }
         bar.add(statusLabel, BorderLayout.WEST);
         bar.add(noticeLabel, BorderLayout.CENTER);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
         right.add(reconnectButton);
         right.add(userLabel);
         bar.add(right, BorderLayout.EAST);

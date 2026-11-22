@@ -2,35 +2,47 @@ package com.livebid.client.ui;
 
 import com.google.gson.reflect.TypeToken;
 import com.livebid.client.net.ServerConnection;
+import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.MyAuctionFilter;
 import com.livebid.common.dto.UserView;
+import com.livebid.common.payload.AuctionIdPayload;
 import com.livebid.common.payload.MyAuctionsPayload;
 import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTable;
-import javax.swing.ListSelectionModel;
+import javax.swing.JToggleButton;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 
 /**
- * Màn “Phiên của tôi”: các phiên người dùng đã đặt giá hoặc đã thắng.
+ * "Phiên của tôi", giống trang {@code #/mine} của web, hai tab:
  *
- * <p>Dữ liệu lấy qua {@code GET_MY_AUCTIONS} với bộ lọc {@link MyAuctionFilter}. Server trả
- * {@code List<AuctionView>} (không phân trang) nên phải dùng {@code TypeToken} khi đọc payload.
- * Bấm đúp một dòng để mở phòng đấu giá qua callback, giống {@link AuctionListPanel}.
+ * <ul>
+ *   <li><b>Đã tham gia / Đã thắng</b>: phiên đã đặt giá (gộp {@code PARTICIPATED} và {@code WON}), phiên
+ *       thắng có nhãn "Bạn đã thắng".</li>
+ *   <li><b>Phiên tôi đăng</b> ({@code CREATED}): mọi trạng thái, mới nhất trước. Phiên "Chờ duyệt" có nút
+ *       Sửa và Hủy phiên; phiên "Đã từ chối" hiện lý do và chỉ xem.</li>
+ * </ul>
+ *
+ * <p>Server trả {@code List<AuctionView>} không phân trang nên đọc payload bằng {@code TypeToken}.
  */
 final class MyAuctionsPanel extends JPanel {
 
@@ -40,146 +52,190 @@ final class MyAuctionsPanel extends JPanel {
     }.getType();
 
     private final ServerConnection connection;
-    private final UserView user;
     private final LongConsumer openAuction;
+    private final Consumer<AuctionView> editPending;
 
-    private final AuctionTableModel model = new AuctionTableModel();
-    private final JTable table = new JTable(model);
-    private final JComboBox<FilterChoice> filterBox = new JComboBox<>(FilterChoice.values());
-    private final JButton refreshButton = new JButton("Làm mới");
-    private final JLabel messageLabel = new JLabel(" ");
+    private final JPanel list = new JPanel();
+    private final JLabel messageLabel = UiTheme.muted(" ");
 
+    private boolean created;
     private boolean loading;
+    private int loadSeq;
 
-    MyAuctionsPanel(ServerConnection connection, UserView user, LongConsumer openAuction) {
+    MyAuctionsPanel(ServerConnection connection, UserView user, LongConsumer openAuction,
+            Consumer<AuctionView> editPending) {
         this.connection = connection;
-        this.user = user;
         this.openAuction = openAuction;
+        this.editPending = editPending;
 
-        setLayout(new BorderLayout(0, 8));
-        setBorder(new EmptyBorder(12, 12, 12, 12));
+        setLayout(new BorderLayout(0, 16));
+        setBorder(new EmptyBorder(24, 28, 16, 28));
+        setOpaque(false);
 
-        table.setFillsViewportHeight(true);
-        table.setRowHeight(24);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.setToolTipText("Bấm đúp vào một phiên để vào phòng đấu giá");
-        table.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    openSelected();
-                }
-            }
-        });
+        JPanel header = new JPanel(new BorderLayout(0, 12));
+        header.setOpaque(false);
+        header.add(UiTheme.heading("Phiên của tôi"), BorderLayout.NORTH);
+        header.add(buildTabs(), BorderLayout.CENTER);
+        add(header, BorderLayout.NORTH);
 
-        add(buildHeader(), BorderLayout.NORTH);
-        add(new JScrollPane(table), BorderLayout.CENTER);
-        add(buildFooter(), BorderLayout.SOUTH);
+        list.setOpaque(false);
+        list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.add(list, BorderLayout.NORTH);
+        JScrollPane scroll = new JScrollPane(top, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        add(scroll, BorderLayout.CENTER);
 
-        refreshButton.addActionListener(e -> load());
-        filterBox.addActionListener(e -> load());
+        add(messageLabel, BorderLayout.SOUTH);
     }
 
-    /** Tải lại danh sách theo bộ lọc đang chọn; gọi khi mở tab hoặc quay lại từ phòng. */
+    /** Tải lại tab đang mở; gọi khi mở màn hình hoặc sau khi sửa/hủy phiên. */
     void refresh() {
         load();
     }
 
-    private JPanel buildHeader() {
-        JPanel header = new JPanel(new BorderLayout(0, 6));
-
-        JLabel title = new JLabel("Phiên của tôi");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
-        header.add(title, BorderLayout.NORTH);
-
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        toolbar.add(new JLabel("Xem:"));
-        toolbar.add(filterBox);
-        toolbar.add(refreshButton);
-        header.add(toolbar, BorderLayout.CENTER);
-
-        return header;
-    }
-
-    private JPanel buildFooter() {
-        JPanel footer = new JPanel(new BorderLayout(8, 0));
-        footer.add(messageLabel, BorderLayout.WEST);
-        footer.add(new JLabel("Người dùng: " + user.displayName()), BorderLayout.EAST);
-        return footer;
+    private JPanel buildTabs() {
+        JPanel tabs = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        tabs.setOpaque(false);
+        ButtonGroup group = new ButtonGroup();
+        JToggleButton joined = UiTheme.pillToggle("Đã tham gia / Đã thắng");
+        JToggleButton mine = UiTheme.pillToggle("Phiên tôi đăng");
+        joined.setSelected(true);
+        joined.addActionListener(e -> {
+            created = false;
+            load();
+        });
+        mine.addActionListener(e -> {
+            created = true;
+            load();
+        });
+        group.add(joined);
+        group.add(mine);
+        tabs.add(joined);
+        tabs.add(mine);
+        return tabs;
     }
 
     private void load() {
-        if (loading) {
-            return;
-        }
+        int seq = ++loadSeq;
         loading = true;
-        FilterChoice choice = (FilterChoice) filterBox.getSelectedItem();
-        MyAuctionFilter filter = choice == null ? MyAuctionFilter.PARTICIPATED : choice.filter;
-        setMessage("Đang tải danh sách phiên...");
-        updateControls();
-
-        connection.<List<AuctionView>>call(MessageType.GET_MY_AUCTIONS,
-                        new MyAuctionsPayload(filter), LIST_OF_AUCTIONS)
-                .whenComplete((auctions, error) -> SwingUtilities.invokeLater(() -> {
-                    loading = false;
-                    updateControls();
-                    if (error != null) {
-                        setMessage("Không tải được danh sách: " + MainFrame.describeError(error));
+        messageLabel.setText("Đang tải...");
+        CompletableFuture<List<AuctionView>> main = fetch(created ? MyAuctionFilter.CREATED : MyAuctionFilter.PARTICIPATED);
+        CompletableFuture<List<AuctionView>> won = created
+                ? CompletableFuture.completedFuture(List.of()) : fetch(MyAuctionFilter.WON);
+        main.thenCombine(won, (items, wonItems) -> new List<?>[] {items, wonItems})
+                .whenComplete((pair, error) -> SwingUtilities.invokeLater(() -> {
+                    if (seq != loadSeq) {
                         return;
                     }
-                    model.setRows(auctions);
-                    if (model.getRowCount() == 0) {
-                        setMessage(emptyMessage(filter));
-                    } else {
-                        setMessage(model.getRowCount() + " phiên.");
+                    loading = false;
+                    if (error != null) {
+                        list.removeAll();
+                        list.revalidate();
+                        list.repaint();
+                        messageLabel.setText("Không tải được danh sách: " + MainFrame.describeError(error));
+                        return;
                     }
+                    @SuppressWarnings("unchecked")
+                    List<AuctionView> items = (List<AuctionView>) pair[0];
+                    @SuppressWarnings("unchecked")
+                    List<AuctionView> wonItems = (List<AuctionView>) pair[1];
+                    render(items, wonItems);
                 }));
     }
 
-    private static String emptyMessage(MyAuctionFilter filter) {
-        return filter == MyAuctionFilter.WON
-                ? "Bạn chưa thắng phiên nào."
-                : "Bạn chưa đặt giá ở phiên nào.";
+    private CompletableFuture<List<AuctionView>> fetch(MyAuctionFilter filter) {
+        CompletableFuture<List<AuctionView>> future = connection.<List<AuctionView>>call(
+                MessageType.GET_MY_AUCTIONS, new MyAuctionsPayload(filter), LIST_OF_AUCTIONS);
+        return future.thenApply(items -> items == null ? List.<AuctionView>of() : items);
     }
 
-    private void openSelected() {
-        int row = table.getSelectedRow();
-        if (row < 0) {
-            setMessage("Hãy chọn một phiên rồi bấm đúp.");
+    private void render(List<AuctionView> items, List<AuctionView> wonItems) {
+        list.removeAll();
+        Set<Long> wonIds = new HashSet<>();
+        for (AuctionView won : wonItems) {
+            wonIds.add(won.auctionId());
+        }
+        List<AuctionView> rows = new ArrayList<>();
+        if (created) {
+            rows.addAll(items);
+        } else {
+            rows.addAll(wonItems);
+            for (AuctionView item : items) {
+                if (!wonIds.contains(item.auctionId())) {
+                    rows.add(item);
+                }
+            }
+        }
+        for (AuctionView auction : rows) {
+            list.add(created ? createdRow(auction) : joinedRow(auction, wonIds.contains(auction.auctionId())));
+            list.add(Box.createVerticalStrut(14));
+        }
+        list.revalidate();
+        list.repaint();
+        messageLabel.setText(rows.isEmpty()
+                ? (created ? "Bạn chưa đăng phiên nào." : "Bạn chưa tham gia phiên nào.") : " ");
+    }
+
+    private JPanel joinedRow(AuctionView auction, boolean won) {
+        JButton enter = auction.status() == AuctionStatus.ACTIVE
+                ? UiTheme.primary("Vào phòng") : UiTheme.secondary("Xem chi tiết");
+        enter.addActionListener(e -> openAuction.accept(auction.auctionId()));
+        return wrap(new AuctionRow(auction, won ? UiTheme.tag("Bạn đã thắng", UiTheme.Tone.WIN) : null,
+                List.of(whenText(auction)), null, AuctionRow.buttons(enter), a -> openAuction.accept(a.auctionId())));
+    }
+
+    private JPanel createdRow(AuctionView auction) {
+        JPanel actions;
+        if (auction.status() == AuctionStatus.PENDING_APPROVAL) {
+            JButton edit = UiTheme.secondary("Sửa");
+            edit.addActionListener(e -> editPending.accept(auction));
+            JButton cancel = UiTheme.danger("Hủy phiên");
+            cancel.addActionListener(e -> cancelAuction(auction));
+            actions = AuctionRow.buttons(edit, cancel);
+        } else {
+            JButton view = UiTheme.secondary("Xem chi tiết");
+            view.addActionListener(e -> openAuction.accept(auction.auctionId()));
+            actions = AuctionRow.buttons(view);
+        }
+        String warning = auction.status() == AuctionStatus.REJECTED
+                ? "Lý do từ chối: " + (auction.rejectReason() == null ? "không có" : auction.rejectReason()) : null;
+        return wrap(new AuctionRow(auction, null, List.of(whenText(auction)), warning, actions,
+                a -> openAuction.accept(a.auctionId())));
+    }
+
+    private static JPanel wrap(AuctionRow row) {
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        return row;
+    }
+
+    private static String whenText(AuctionView a) {
+        return switch (a.status()) {
+            case ACTIVE -> "Kết thúc " + TimeFormat.dateTime(a.endsAt());
+            case FINISHED -> "Đã kết thúc " + TimeFormat.dateTime(a.endsAt());
+            default -> "Bắt đầu " + TimeFormat.dateTime(a.startsAt());
+        };
+    }
+
+    private void cancelAuction(AuctionView auction) {
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Bạn chắc chắn muốn hủy phiên \"" + auction.title() + "\"?\nThao tác này không thể hoàn tác.",
+                "Hủy phiên", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) {
             return;
         }
-        AuctionView auction = model.rowAt(table.convertRowIndexToModel(row));
-        if (auction != null) {
-            openAuction.accept(auction.auctionId());
-        }
-    }
-
-    private void updateControls() {
-        filterBox.setEnabled(!loading);
-        refreshButton.setEnabled(!loading);
-    }
-
-    private void setMessage(String message) {
-        messageLabel.setText(message == null || message.isBlank() ? " " : message);
-    }
-
-    /** Lựa chọn trong combo, kèm nhãn tiếng Việt. */
-    private enum FilterChoice {
-        PARTICIPATED("Đã tham gia", MyAuctionFilter.PARTICIPATED),
-        WON("Đã thắng", MyAuctionFilter.WON);
-
-        private final String label;
-        private final MyAuctionFilter filter;
-
-        FilterChoice(String label, MyAuctionFilter filter) {
-            this.label = label;
-            this.filter = filter;
-        }
-
-        @Override
-        public String toString() {
-            return label;
-        }
+        messageLabel.setText("Đang hủy phiên...");
+        connection.call(MessageType.CANCEL_AUCTION, new AuctionIdPayload(auction.auctionId()), (Type) Void.class)
+                .whenComplete((ignored, error) -> SwingUtilities.invokeLater(() -> {
+                    if (error != null) {
+                        messageLabel.setText("Không hủy được phiên: " + MainFrame.describeError(error));
+                    }
+                    load();
+                }));
     }
 }

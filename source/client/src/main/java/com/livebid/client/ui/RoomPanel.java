@@ -20,17 +20,21 @@ import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.ErrorInfo;
 import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.Insets;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -83,9 +87,9 @@ final class RoomPanel extends JPanel {
     private final JLabel timeLabel = new JLabel(" ");
     private final JLabel countdownLabel = new JLabel(" ");
     private final JLabel messageLabel = new JLabel(" ");
-    private final JTextField amountField = new JTextField(12);
-    private final JButton bidButton = new JButton("Đặt giá");
-    private final JButton reloadHistoryButton = new JButton("Tải lại lịch sử");
+    private final JTextField amountField = UiTheme.field(new JTextField(12));
+    private final JButton bidButton = UiTheme.onDark("Đặt giá");
+    private final JButton reloadHistoryButton = UiTheme.secondary("Tải lại lịch sử");
     private final DefaultTableModel historyModel = new DefaultTableModel(
             new Object[] {"Thời điểm", "Người đặt", "Số tiền"}, 0) {
         private static final long serialVersionUID = 1L;
@@ -107,20 +111,39 @@ final class RoomPanel extends JPanel {
         this.user = user;
         this.onLeave = onLeave;
 
-        setLayout(new BorderLayout(0, 8));
-        setBorder(new EmptyBorder(12, 12, 12, 12));
+        setLayout(new BorderLayout(0, 16));
+        setBorder(new EmptyBorder(20, 28, 16, 28));
+        setOpaque(false);
 
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 18f));
+        titleLabel.setFont(UiTheme.sans(Font.BOLD, 26f));
+        titleLabel.setForeground(UiTheme.INK);
+        statusLabel.setFont(UiTheme.sans(Font.BOLD, 12f));
+        statusLabel.setForeground(UiTheme.PRIMARY_DEEP);
         descriptionArea.setEditable(false);
         descriptionArea.setLineWrap(true);
         descriptionArea.setWrapStyleWord(true);
-        historyTable.setRowHeight(22);
-        historyTable.setFillsViewportHeight(true);
-        historyTable.getTableHeader().setReorderingAllowed(false);
+        descriptionArea.setOpaque(false);
+        descriptionArea.setFont(UiTheme.sans(Font.PLAIN, 14f));
+        descriptionArea.setForeground(UiTheme.INK_SECONDARY);
+        descriptionArea.setBorder(null);
+        UiTheme.table(historyTable);
+
+        priceCaptionLabel.setForeground(UiTheme.ON_DARK_MUTE);
+        priceCaptionLabel.setFont(UiTheme.sans(Font.PLAIN, 13f));
+        priceLabel.setForeground(Color.WHITE);
+        priceLabel.setFont(UiTheme.money(40f));
+        leaderLabel.setForeground(Color.WHITE);
+        winnerLabel.setForeground(Color.WHITE);
+        winnerLabel.setFont(UiTheme.sans(Font.BOLD, 14f));
+        countdownLabel.setForeground(Color.WHITE);
+        countdownLabel.setFont(UiTheme.money(22f));
+        messageLabel.setForeground(Color.WHITE);
+        messageLabel.setFont(UiTheme.sans(Font.PLAIN, 13f));
+        incrementLabel.setForeground(UiTheme.INK_SECONDARY);
+        timeLabel.setForeground(UiTheme.INK_SECONDARY);
 
         add(buildHeader(), BorderLayout.NORTH);
         add(buildCenter(), BorderLayout.CENTER);
-        add(buildBidArea(), BorderLayout.SOUTH);
 
         bidButton.addActionListener(e -> placeBid());
         amountField.addActionListener(e -> placeBid());
@@ -198,95 +221,134 @@ final class RoomPanel extends JPanel {
     }
 
     private JPanel buildHeader() {
-        JPanel header = new JPanel(new BorderLayout(8, 0));
-        JButton backButton = new JButton("‹ Danh sách phiên");
+        JPanel header = new JPanel(new BorderLayout(12, 0));
+        header.setOpaque(false);
+        JButton backButton = UiTheme.secondary("‹ Danh sách phiên");
         backButton.addActionListener(e -> leave());
         header.add(backButton, BorderLayout.WEST);
-        header.add(titleLabel, BorderLayout.CENTER);
-        header.add(statusLabel, BorderLayout.EAST);
         return header;
     }
 
+    /** Hai cột như phòng đấu giá trên web: bên trái thông tin và lịch sử, bên phải khối giá navy. */
     private JPanel buildCenter() {
-        JPanel center = new JPanel(new BorderLayout(0, 8));
-        center.add(buildInfoPanel(), BorderLayout.NORTH);
-        center.add(buildHistoryPanel(), BorderLayout.CENTER);
+        JPanel center = new JPanel(new GridBagLayout());
+        center.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.anchor = GridBagConstraints.NORTH;
+        gbc.weighty = 1;
+
+        gbc.gridx = 0;
+        gbc.weightx = 1;
+        gbc.insets = new Insets(0, 0, 0, 24);
+        center.add(buildMain(), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 0;
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        JPanel side = buildSide();
+        side.setPreferredSize(new Dimension(360, side.getPreferredSize().height));
+        center.add(side, gbc);
         return center;
     }
 
-    private JPanel buildInfoPanel() {
-        JPanel info = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(2, 2, 2, 2);
-        gbc.anchor = GridBagConstraints.LINE_START;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1;
+    private JPanel buildMain() {
+        JPanel main = new JPanel(new BorderLayout(0, 20));
+        main.setOpaque(false);
+        main.add(buildDetails(), BorderLayout.NORTH);
+        main.add(buildHistoryPanel(), BorderLayout.CENTER);
+        return main;
+    }
 
-        priceLabel.setFont(priceLabel.getFont().deriveFont(Font.BOLD, 16f));
+    private JPanel buildDetails() {
+        JPanel card = UiTheme.card(new BorderLayout(0, 10), 24);
+        JPanel top = new JPanel(new BorderLayout(0, 6));
+        top.setOpaque(false);
+        top.add(statusLabel, BorderLayout.NORTH);
+        top.add(titleLabel, BorderLayout.CENTER);
+        card.add(top, BorderLayout.NORTH);
 
-        gbc.gridy = 0;
-        gbc.gridx = 0;
-        gbc.weightx = 0;
-        info.add(priceCaptionLabel, gbc);
-        gbc.gridx = 1;
-        gbc.weightx = 1;
-        info.add(priceLabel, gbc);
-
-        gbc.gridy = 1;
-        gbc.gridx = 0;
-        gbc.gridwidth = 2;
-        info.add(incrementLabel, gbc);
-
-        gbc.gridy = 2;
-        info.add(leaderLabel, gbc);
-
-        gbc.gridy = 3;
-        winnerLabel.setVisible(false);
-        info.add(winnerLabel, gbc);
-
-        gbc.gridy = 4;
-        info.add(timeLabel, gbc);
-
-        gbc.gridy = 5;
-        countdownLabel.setFont(countdownLabel.getFont().deriveFont(Font.BOLD, 14f));
-        info.add(countdownLabel, gbc);
-
-        gbc.gridy = 6;
-        info.add(new JLabel("Mô tả:"), gbc);
-
-        gbc.gridy = 7;
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
-        descriptionScroll.setPreferredSize(new Dimension(100, 56));
-        info.add(descriptionScroll, gbc);
+        descriptionScroll.setBorder(null);
+        descriptionScroll.setOpaque(false);
+        descriptionScroll.getViewport().setOpaque(false);
+        descriptionScroll.setPreferredSize(new Dimension(100, 64));
+        card.add(descriptionScroll, BorderLayout.CENTER);
 
-        return info;
+        JPanel facts = new JPanel(new GridLayout(2, 1, 0, 2));
+        facts.setOpaque(false);
+        facts.add(incrementLabel);
+        facts.add(timeLabel);
+        card.add(facts, BorderLayout.SOUTH);
+        return card;
     }
 
     private JPanel buildHistoryPanel() {
-        JPanel panel = new JPanel(new BorderLayout(0, 4));
-        panel.setBorder(BorderFactory.createTitledBorder("Lịch sử đặt giá (mới nhất trước)"));
-        panel.add(new JScrollPane(historyTable), BorderLayout.CENTER);
+        JPanel card = UiTheme.card(new BorderLayout(0, 10), 24);
+        JLabel heading = new JLabel("Lịch sử đặt giá");
+        heading.setFont(UiTheme.sans(Font.BOLD, 16f));
+        heading.setForeground(UiTheme.INK);
+        card.add(heading, BorderLayout.NORTH);
+
+        JScrollPane scroll = new JScrollPane(historyTable);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(UiTheme.CANVAS);
+        scroll.setPreferredSize(new Dimension(100, 200));
+        card.add(scroll, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        footer.setOpaque(false);
         footer.add(reloadHistoryButton);
-        panel.add(footer, BorderLayout.SOUTH);
-        return panel;
+        card.add(footer, BorderLayout.SOUTH);
+        return card;
     }
 
-    private JPanel buildBidArea() {
-        JPanel area = new JPanel(new BorderLayout(0, 4));
+    /** Khối giá nền navy: giá hiện tại, người dẫn đầu, đồng hồ, ô đặt giá và một nút chính. */
+    private JPanel buildSide() {
+        JPanel card = UiTheme.featuredCard(new BorderLayout(), 24);
+        JPanel box = new JPanel();
+        box.setOpaque(false);
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
 
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
-        row.add(new JLabel("Giá của bạn:"));
-        row.add(amountField);
-        row.add(bidButton);
+        addLeft(box, priceCaptionLabel);
+        addLeft(box, priceLabel);
+        box.add(Box.createVerticalStrut(10));
+        addLeft(box, leaderLabel);
+        addLeft(box, winnerLabel);
+        box.add(Box.createVerticalStrut(14));
+        addLeft(box, countdownLabel);
+        box.add(Box.createVerticalStrut(14));
+        addLeft(box, messageLabel);
+        box.add(Box.createVerticalStrut(14));
+
         if (user.role() == Role.ADMIN) {
-            row.setVisible(false);
+            JLabel note = new JLabel("Quản trị viên không tham gia đặt giá");
+            note.setForeground(Color.WHITE);
+            note.setFont(UiTheme.sans(Font.PLAIN, 14f));
+            addLeft(box, note);
+        } else {
+            JLabel amountCaption = new JLabel("Giá bạn đặt (đ)");
+            amountCaption.setForeground(UiTheme.ON_DARK_MUTE);
+            amountCaption.setFont(UiTheme.sans(Font.PLAIN, 13f));
+            addLeft(box, amountCaption);
+            box.add(Box.createVerticalStrut(4));
+            amountField.setMaximumSize(new Dimension(Integer.MAX_VALUE, amountField.getPreferredSize().height));
+            amountField.setFont(UiTheme.money(16f));
+            addLeft(box, amountField);
+            box.add(Box.createVerticalStrut(10));
+            bidButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, bidButton.getPreferredSize().height));
+            addLeft(box, bidButton);
         }
+        card.add(box, BorderLayout.CENTER);
+        return card;
+    }
 
-        area.add(row, BorderLayout.NORTH);
-        area.add(messageLabel, BorderLayout.SOUTH);
-        return area;
+    private static void addLeft(JPanel box, java.awt.Component component) {
+        ((javax.swing.JComponent) component).setAlignmentX(LEFT_ALIGNMENT);
+        box.add(component);
     }
 
     private void renderState() {
@@ -448,6 +510,15 @@ final class RoomPanel extends JPanel {
         setMessage(MainFrame.describeError(error));
     }
 
+    /** Rời phòng từ bên ngoài (thanh điều hướng): gửi LEAVE_AUCTION và dừng đồng hồ, không gọi callback. */
+    void exit() {
+        countdownTimer.stop();
+        if (connection.isConnected()) {
+            connection.request(MessageType.LEAVE_AUCTION, new AuctionIdPayload(auctionId))
+                    .exceptionally(e -> null);
+        }
+    }
+
     private void leave() {
         countdownTimer.stop();
         if (connection.isConnected()) {
@@ -458,6 +529,11 @@ final class RoomPanel extends JPanel {
     }
 
     private void setMessage(String message) {
-        messageLabel.setText(message == null || message.isBlank() ? " " : message);
+        if (message == null || message.isBlank()) {
+            messageLabel.setText(" ");
+            return;
+        }
+        String safe = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        messageLabel.setText("<html><body style='width:290px'>" + safe + "</body></html>");
     }
 }
