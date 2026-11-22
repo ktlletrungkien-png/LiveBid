@@ -38,4 +38,16 @@ public final class InMemoryUserRepository implements UserRepository {
         byId.put(user.id(), user);
         return user;
     }
+
+    @Override
+    public synchronized void updateDisplayName(long id, String displayName) {
+        byId.computeIfPresent(id, (k, u) -> new User(u.id(), u.username(), displayName, u.passwordHash(),
+                u.passwordSalt(), u.passwordIterations(), u.role(), u.createdAt()));
+    }
+
+    @Override
+    public synchronized void updatePassword(long id, String hash, String salt, int iterations) {
+        byId.computeIfPresent(id, (k, u) -> new User(u.id(), u.username(), u.displayName(), hash, salt,
+                iterations, u.role(), u.createdAt()));
+    }
 }

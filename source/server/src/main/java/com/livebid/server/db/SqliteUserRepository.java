@@ -61,6 +61,28 @@ public final class SqliteUserRepository implements UserRepository {
         }
     }
 
+    @Override
+    public void updateDisplayName(long id, String displayName) {
+        execute("UPDATE users SET display_name = ? WHERE id = ?", displayName, id);
+    }
+
+    @Override
+    public void updatePassword(long id, String hash, String salt, int iterations) {
+        execute("UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE id = ?",
+                hash, salt, iterations, id);
+    }
+
+    private void execute(String sql, Object... params) {
+        try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
+            for (int i = 0; i < params.length; i++) {
+                ps.setObject(i + 1, params[i]);
+            }
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new DataAccessException("Lỗi cập nhật bảng users", e);
+        }
+    }
+
     private Optional<User> querySingle(String sql, Object param) {
         try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
             ps.setObject(1, param);

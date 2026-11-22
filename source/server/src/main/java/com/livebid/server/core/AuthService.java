@@ -24,6 +24,14 @@ public interface AuthService {
 
     CompletableFuture<UserPrincipal> login(String username, String password);
 
+    /**
+     * Cập nhật hồ sơ của chính người dùng. {@code newPassword} rỗng hoặc null = không đổi mật khẩu;
+     * có {@code newPassword} thì bắt buộc {@code currentPassword} đúng.
+     * Lỗi: {@code VALIDATION_ERROR} (dữ liệu sai hoặc mật khẩu hiện tại không đúng).
+     */
+    CompletableFuture<UserPrincipal> updateProfile(UserPrincipal user, String displayName,
+                                                   String currentPassword, String newPassword);
+
     /** Cấp token cho web (REST + WebSocket AUTH). Lưu trong bộ nhớ ở bản đầu. */
     String issueToken(UserPrincipal user);
 

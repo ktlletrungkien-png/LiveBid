@@ -14,4 +14,10 @@ public interface UserRepository {
 
     /** Thêm và trả về bản có id. Trùng username → {@link DataAccessException}. */
     User insert(NewUser user);
+
+    /** Đổi tên hiển thị của người dùng. */
+    void updateDisplayName(long id, String displayName);
+
+    /** Đổi mật khẩu: lưu hash, salt và số vòng lặp mới. */
+    void updatePassword(long id, String hash, String salt, int iterations);
 }

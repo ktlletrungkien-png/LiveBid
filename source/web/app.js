@@ -848,19 +848,112 @@ function renderHeader(route) {
     for (const [name, label] of links) {
         nav.append(el("a", { href: "#/" + name, text: label, "aria-current": route.name === name || (name === "auctions" && route.name === "auction") ? "page" : null }));
     }
-    box.append(
-        el("span", { class: "muted", text: currentUser.displayName }),
-        el("span", { class: isAdmin() ? "tag" : "tag tag-done", text: isAdmin() ? "Quản trị viên" : "Người dùng" }),
-        el("button", { class: "btn-secondary", type: "button", text: "Đăng xuất", onclick: async () => {
+    box.append(userMenu());
+}
+
+// Avatar (chữ cái đầu) ở góc phải: bấm để mở menu Thông tin cá nhân / Đăng xuất.
+let closeUserMenu = () => {};
+
+function initials(name) {
+    const words = String(name || "?").trim().split(/\s+/);
+    const pick = words.length > 1 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 2);
+    return pick.toUpperCase();
+}
+
+function userMenu() {
+    closeUserMenu();
+    const avatar = el("button", {
+        class: "avatar", type: "button", text: initials(currentUser.displayName),
+        "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": "Tài khoản: " + currentUser.displayName,
+    });
+    const menu = el("div", { class: "user-menu", role: "menu", hidden: true },
+        el("div", { class: "user-menu-head" },
+            el("strong", { text: currentUser.displayName }),
+            el("span", { class: "muted", text: isAdmin() ? "Quản trị viên" : "Người dùng" })),
+        el("a", { href: "#/profile", role: "menuitem", text: "Thông tin cá nhân" }),
+        el("button", { type: "button", role: "menuitem", class: "menu-logout", text: "Đăng xuất", onclick: async () => {
+            close();
             try { await api.logout(); } catch { /* vẫn đăng xuất phía giao diện */ }
             setUser(null);
             go("#/login");
         } }));
+
+    const onOutside = (event) => { if (!wrap.contains(event.target)) close(); };
+    const onKey = (event) => { if (event.key === "Escape") { close(); avatar.focus(); } };
+    function close() {
+        menu.hidden = true;
+        avatar.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", onOutside);
+        document.removeEventListener("keydown", onKey);
+    }
+    avatar.addEventListener("click", () => {
+        if (!menu.hidden) { close(); return; }
+        menu.hidden = false;
+        avatar.setAttribute("aria-expanded", "true");
+        document.addEventListener("click", onOutside);
+        document.addEventListener("keydown", onKey);
+        menu.querySelector("a").focus();
+    });
+    menu.querySelector("a").addEventListener("click", close);
+
+    const wrap = el("div", { class: "user-menu-wrap" }, avatar, menu);
+    closeUserMenu = close;
+    return wrap;
+}
+
+/* ====================== Thông tin cá nhân ====================== */
+
+function profileView() {
+    const name = field({ id: "pf-name", label: "Tên hiển thị", maxlength: 50, value: currentUser.displayName });
+    const current = field({ id: "pf-current", label: "Mật khẩu hiện tại", type: "password", autocomplete: "current-password" });
+    const next = field({ id: "pf-new", label: "Mật khẩu mới", type: "password", autocomplete: "new-password" });
+    const again = field({ id: "pf-again", label: "Nhập lại mật khẩu mới", type: "password", autocomplete: "new-password" });
+    const formError = el("p", { class: "form-error", role: "alert" });
+    const submit = el("button", { class: "btn-primary", type: "submit", text: "Lưu thay đổi" });
+    const form = el("form", { class: "stack", novalidate: true },
+        name.wrap,
+        el("h3", { text: "Đổi mật khẩu", style: "margin:var(--sp-md) 0 0" }),
+        el("p", { class: "muted", style: "margin:0", text: "Để trống nếu không muốn đổi mật khẩu." }),
+        current.wrap, next.wrap, again.wrap, formError, submit);
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const displayName = name.input.value.trim();
+        const wantsPassword = current.input.value || next.input.value || again.input.value;
+        name.setError(displayName.length >= 1 && displayName.length <= 50 ? "" : "Tên hiển thị phải từ 1 đến 50 ký tự.");
+        current.setError(!wantsPassword || current.input.value ? "" : "Nhập mật khẩu hiện tại.");
+        next.setError(!wantsPassword || next.input.value.length >= 8 ? "" : "Mật khẩu mới cần ít nhất 8 ký tự.");
+        again.setError(!wantsPassword || again.input.value === next.input.value ? "" : "Mật khẩu nhập lại không khớp.");
+        if (form.querySelector("[data-invalid]")) return;
+
+        submit.disabled = true;
+        formError.textContent = "";
+        try {
+            const updated = await api.updateProfile({
+                displayName,
+                currentPassword: wantsPassword ? current.input.value : undefined,
+                newPassword: wantsPassword ? next.input.value : undefined,
+            });
+            setUser({ ...currentUser, displayName: (updated && updated.displayName) || displayName });
+            renderHeader(parseHash());
+            for (const f of [current, next, again]) f.input.value = "";
+            toast("Đã cập nhật thông tin.");
+        } catch (error) {
+            formError.textContent = errorText(error);
+        } finally {
+            submit.disabled = false;
+        }
+    });
+
+    return { node: el("div", {},
+        el("div", { class: "page-head" }, el("h2", { text: "Thông tin cá nhân" }),
+            el("span", { class: "muted", text: (isAdmin() ? "Quản trị viên" : "Người dùng") + " · " + initials(currentUser.displayName) })),
+        el("section", { class: "card form-card" }, form)) };
 }
 
 const VIEWS = {
     login: loginView, auctions: listView, auction: auctionView,
-    create: createView, mine: mineView, admin: adminView,
+    create: createView, mine: mineView, admin: adminView, profile: profileView,
 };
 
 async function render() {

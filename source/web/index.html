@@ -24,7 +24,17 @@
         #nav a:hover { background: var(--canvas-soft); }
         #nav a[aria-current="page"] { background: var(--primary-subdued); color: var(--primary-deep); font-weight: 600; }
         #user-box { display: flex; align-items: center; gap: var(--sp-sm); flex-wrap: wrap; }
-        #user-box .btn-secondary { padding: 8px 14px; font-size: 14px; }
+        .user-menu-wrap { position: relative; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--primary-subdued); background: var(--primary-subdued);
+            color: var(--primary-deep); font: 600 14px/1 var(--font); cursor: pointer; }
+        .avatar:hover, .avatar[aria-expanded="true"] { border-color: var(--primary); }
+        .user-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 220px; z-index: 20; background: var(--canvas);
+            border: 1px solid var(--hairline); border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: var(--sp-sm); display: flex; flex-direction: column; }
+        .user-menu-head { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-sm) var(--sp-md) var(--sp-md); border-bottom: 1px solid var(--hairline); margin-bottom: var(--sp-xs); }
+        .user-menu a, .user-menu button { display: block; width: 100%; text-align: left; padding: 10px var(--sp-md); border: none; border-radius: var(--r-sm);
+            background: none; color: var(--ink); font: 400 15px var(--font); cursor: pointer; }
+        .user-menu a:hover, .user-menu button:hover { background: var(--canvas-soft); }
+        .user-menu .menu-logout { color: var(--ruby); }
         .mock-note { text-align: center; padding: var(--sp-xs) var(--sp-lg); background: var(--canvas); border-bottom: 1px solid var(--hairline); font-size: 13px; color: var(--ink-secondary); }
 
         .container { max-width: 1100px; margin: 0 auto; padding: var(--sp-xxl) var(--sp-xl); }

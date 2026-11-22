@@ -94,6 +94,12 @@ const api = {
         return request("GET", "/api/me");
     },
 
+    // PUT /api/me  {displayName, currentPassword?, newPassword?} -> {id, displayName, role}
+    // CHÚ Ý: server hiện chưa có endpoint này (HttpGateway chỉ có GET /api/me), cần thêm ở backend.
+    updateProfile(profile) {
+        return request("PUT", "/api/me", profile);
+    },
+
     listAuctions(status, page, pageSize) {
         const filterStatus = status && status !== "ALL" ? status : null;
         return request("GET", "/api/auctions" + query({ status: filterStatus, page, pageSize }));

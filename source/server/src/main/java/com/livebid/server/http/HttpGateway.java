@@ -77,6 +77,10 @@ public final class HttpGateway implements AutoCloseable {
     private record UpdateBody(long expectedVersion, AuctionDraft draft) {
     }
 
+    /** Body của {@code PUT /api/me}; mật khẩu để trống nghĩa là không đổi. */
+    private record ProfileBody(String displayName, String currentPassword, String newPassword) {
+    }
+
     /** Body của {@code POST /api/auctions/{id}/reject}. */
     private record RejectBody(String reason) {
     }
@@ -174,6 +178,7 @@ public final class HttpGateway implements AutoCloseable {
         app.post("/api/login", this::login);
         app.post("/api/logout", this::logout);
         app.get("/api/me", this::me);
+        app.put("/api/me", this::updateMe);
         app.get("/api/me/auctions", this::myAuctions);
         app.get("/api/auctions", this::listAuctions);
         // Khai báo /pending trước /{id} để Javalin không hiểu nhầm "pending" là mã phiên.
@@ -273,6 +278,12 @@ public final class HttpGateway implements AutoCloseable {
 
     private void me(Context ctx) {
         respondNow(ctx, 200, principal(ctx).toView());
+    }
+
+    private void updateMe(Context ctx) {
+        ProfileBody p = body(ctx, ProfileBody.class);
+        respond(ctx, 200, auth.updateProfile(principal(ctx), p.displayName(), p.currentPassword(), p.newPassword())
+                .thenApply(UserPrincipal::toView));
     }
 
     private LoginResult loginResult(UserPrincipal user) {
