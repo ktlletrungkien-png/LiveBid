@@ -15,6 +15,8 @@ public enum MessageType {
     REGISTER(false),
     LOGIN(false),
     LOGOUT(false),
+    /** Đổi tên hiển thị và/hoặc mật khẩu của chính người dùng đang đăng nhập. */
+    UPDATE_PROFILE(false),
     LIST_AUCTIONS(false),
     GET_AUCTION(false),
     JOIN_AUCTION(false),

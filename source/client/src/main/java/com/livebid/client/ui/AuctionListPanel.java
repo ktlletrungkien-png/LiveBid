@@ -5,42 +5,39 @@ import com.livebid.client.net.ServerConnection;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.PageResult;
-import com.livebid.common.dto.Role;
 import com.livebid.common.dto.UserView;
 import com.livebid.common.payload.ListAuctionsPayload;
 import com.livebid.common.protocol.MessageType;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
+import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTable;
-import javax.swing.ListSelectionModel;
+import javax.swing.JToggleButton;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 
 /**
- * Danh sách phiên đấu giá sau khi đăng nhập: bảng, bộ lọc trạng thái, phân trang và mở phòng bằng cách
- * bấm đúp.
+ * "Phiên đấu giá": lưới thẻ, bộ lọc dạng pill và phân trang, giống trang {@code #/auctions} của web.
  *
- * <p>Dữ liệu lấy qua {@code LIST_AUCTIONS} với {@code pageSize} 20. Yêu cầu chạy trên luồng mạng của
- * {@link ServerConnection}; mọi cập nhật bảng đều quay về EDT bằng {@link SwingUtilities#invokeLater}.
- * Nút và bộ lọc bị khóa trong lúc tải để tránh hai yêu cầu chồng nhau.
+ * <p>Dữ liệu lấy qua {@code LIST_AUCTIONS}. Yêu cầu chạy trên luồng mạng của {@link ServerConnection}; mọi
+ * cập nhật giao diện quay về EDT. Đồng hồ trên các thẻ chạy mỗi giây theo giờ server (lệch giờ được tính
+ * từ {@code serverTime} của dữ liệu vừa tải). Bộ lọc và nút phân trang bị khóa trong lúc tải.
  */
 final class AuctionListPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int PAGE_SIZE = 20;
+    private static final int PAGE_SIZE = 12;
 
     private static final Type PAGE_OF_AUCTIONS = new TypeToken<PageResult<AuctionView>>() {
     }.getType();
@@ -48,111 +45,105 @@ final class AuctionListPanel extends JPanel {
     private final ServerConnection connection;
     private final UserView user;
     private final LongConsumer openAuction;
-    private final Runnable createAuction;
     private final Consumer<AuctionView> editAuction;
 
-    private final AuctionTableModel model = new AuctionTableModel();
-    private final JTable table = new JTable(model);
-    private final JComboBox<StatusFilter> statusFilter = new JComboBox<>(StatusFilter.values());
-    private final JButton refreshButton = new JButton("Làm mới");
-    private final JButton createButton = new JButton("Tạo phiên");
-    private final JButton editButton = new JButton("Sửa phiên");
-    private final JButton previousButton = new JButton("‹ Trang trước");
-    private final JButton nextButton = new JButton("Trang sau ›");
-    private final JLabel pageLabel = new JLabel();
-    private final JLabel messageLabel = new JLabel(" ");
+    private final CardGrid grid = new CardGrid();
+    private final JLabel totalLabel = UiTheme.muted(" ");
+    private final JLabel messageLabel = UiTheme.muted(" ");
+    private final JLabel pageLabel = UiTheme.muted("Trang 1");
+    private final JButton previousButton = UiTheme.secondary("‹ Trước");
+    private final JButton nextButton = UiTheme.secondary("Sau ›");
+    private final JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+    private final Timer clock = new Timer(1_000, e -> tickCards());
 
+    private StatusFilter filter = StatusFilter.ALL;
     private int page = 1;
     private boolean hasMore;
     private boolean loading;
+    private long clockOffset;
 
-    AuctionListPanel(ServerConnection connection, UserView user, LongConsumer openAuction) {
-        this(connection, user, openAuction, null, null);
-    }
-
-    /**
-     * @param createAuction mở form tạo phiên; {@code null} thì không hiện nút (người dùng thường)
-     * @param editAuction   mở form sửa phiên đang chọn; {@code null} thì không hiện nút
-     */
     AuctionListPanel(ServerConnection connection, UserView user, LongConsumer openAuction,
-            Runnable createAuction, Consumer<AuctionView> editAuction) {
+            Consumer<AuctionView> editAuction) {
         this.connection = connection;
         this.user = user;
         this.openAuction = openAuction;
-        this.createAuction = createAuction;
         this.editAuction = editAuction;
 
-        setLayout(new BorderLayout(0, 8));
-        setBorder(new EmptyBorder(12, 12, 12, 12));
-
-        table.setFillsViewportHeight(true);
-        table.setRowHeight(24);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.setToolTipText("Bấm đúp vào một phiên để vào phòng đấu giá");
-        table.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    openSelected();
-                }
-            }
-        });
+        setLayout(new BorderLayout(0, 16));
+        setBorder(new EmptyBorder(24, 28, 16, 28));
+        setOpaque(false);
 
         add(buildHeader(), BorderLayout.NORTH);
-        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JScrollPane scroll = new JScrollPane(grid, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        add(scroll, BorderLayout.CENTER);
+
         add(buildFooter(), BorderLayout.SOUTH);
 
-        refreshButton.addActionListener(e -> load(page));
         previousButton.addActionListener(e -> load(Math.max(1, page - 1)));
         nextButton.addActionListener(e -> load(page + 1));
-        statusFilter.addActionListener(e -> load(1));
-        createButton.addActionListener(e -> {
-            if (createAuction != null) {
-                createAuction.run();
-            }
-        });
-        editButton.addActionListener(e -> editSelected());
-        table.getSelectionModel().addListSelectionListener(e -> updateEditButton());
-
         updatePager();
     }
 
-    /** Tải lại trang đang xem; gọi sau khi đăng nhập hoặc khi quay lại từ phòng đấu giá. */
+    /** Tải lại trang đang xem; gọi khi mở màn hình hoặc quay lại từ phòng đấu giá. */
     void refresh() {
         load(page);
     }
 
     private JPanel buildHeader() {
-        JPanel header = new JPanel(new BorderLayout(0, 6));
+        JPanel header = new JPanel(new BorderLayout(0, 12));
+        header.setOpaque(false);
 
-        JLabel title = new JLabel("Danh sách phiên đấu giá");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
-        header.add(title, BorderLayout.NORTH);
+        JPanel titleBlock = new JPanel(new BorderLayout(0, 2));
+        titleBlock.setOpaque(false);
+        titleBlock.add(UiTheme.heading("Phiên đấu giá"), BorderLayout.NORTH);
+        titleBlock.add(totalLabel, BorderLayout.SOUTH);
+        header.add(titleBlock, BorderLayout.NORTH);
 
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        toolbar.add(new JLabel("Trạng thái:"));
-        toolbar.add(statusFilter);
-        toolbar.add(refreshButton);
-        toolbar.add(previousButton);
-        toolbar.add(nextButton);
-        toolbar.add(pageLabel);
-        if (user.role() == Role.ADMIN && createAuction != null) {
-            toolbar.add(createButton);
+        filterBar.setOpaque(false);
+        ButtonGroup group = new ButtonGroup();
+        for (StatusFilter option : StatusFilter.values()) {
+            JToggleButton pill = UiTheme.pillToggle(option.label);
+            pill.setSelected(option == filter);
+            pill.addActionListener(e -> {
+                if (loading) {
+                    pill.setSelected(false);
+                    selectCurrentFilter();
+                    return;
+                }
+                filter = option;
+                load(1);
+            });
+            group.add(pill);
+            filterBar.add(pill);
         }
-        if (user.role() == Role.ADMIN && editAuction != null) {
-            toolbar.add(editButton);
-        }
-        header.add(toolbar, BorderLayout.CENTER);
-
+        header.add(filterBar, BorderLayout.CENTER);
         return header;
+    }
+
+    private void selectCurrentFilter() {
+        StatusFilter[] all = StatusFilter.values();
+        for (int i = 0; i < all.length; i++) {
+            ((JToggleButton) filterBar.getComponent(i)).setSelected(all[i] == filter);
+        }
     }
 
     private JPanel buildFooter() {
         JPanel footer = new JPanel(new BorderLayout(8, 0));
+        footer.setOpaque(false);
         footer.add(messageLabel, BorderLayout.WEST);
-        JLabel hint = new JLabel("Người dùng: " + user.displayName());
-        footer.add(hint, BorderLayout.EAST);
+
+        JPanel pager = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        pager.setOpaque(false);
+        pager.add(previousButton);
+        pager.add(pageLabel);
+        pager.add(nextButton);
+        footer.add(pager, BorderLayout.EAST);
         return footer;
     }
 
@@ -161,96 +152,81 @@ final class AuctionListPanel extends JPanel {
             return;
         }
         loading = true;
-        setMessage("Đang tải danh sách phiên...");
+        messageLabel.setText("Đang tải danh sách phiên...");
         updatePager();
 
-        StatusFilter filter = (StatusFilter) statusFilter.getSelectedItem();
-        AuctionStatus status = filter == null ? null : filter.status;
+        AuctionStatus status = filter.status;
         connection.<PageResult<AuctionView>>call(MessageType.LIST_AUCTIONS,
                         new ListAuctionsPayload(status, requestedPage, PAGE_SIZE), PAGE_OF_AUCTIONS)
                 .whenComplete((result, error) -> SwingUtilities.invokeLater(() -> {
                     loading = false;
                     if (error != null) {
-                        setMessage("Không tải được danh sách: " + MainFrame.describeError(error));
+                        messageLabel.setText("Không tải được danh sách: " + MainFrame.describeError(error));
                         updatePager();
                         return;
                     }
-                    if (result == null) {
-                        model.setRows(List.of());
-                        hasMore = false;
-                        updatePager();
-                        setMessage("Server không trả về danh sách phiên.");
-                        return;
-                    }
-                    page = Math.max(1, result.page());
-                    hasMore = result.hasMore();
-                    model.setRows(result.items());
-                    updatePager();
-                    if (model.getRowCount() == 0) {
-                        setMessage("Không có phiên nào ở trang này.");
-                    } else {
-                        setMessage("Trang " + page + ": " + model.getRowCount() + " phiên.");
-                    }
+                    show(result);
                 }));
     }
 
-    private void openSelected() {
-        int row = table.getSelectedRow();
-        if (row < 0) {
-            setMessage("Hãy chọn một phiên rồi bấm đúp.");
-            return;
+    private void show(PageResult<AuctionView> result) {
+        grid.removeAll();
+        List<AuctionView> items = result == null ? List.of() : result.items();
+        hasMore = result != null && result.hasMore();
+        if (result != null) {
+            page = Math.max(1, result.page());
         }
-        AuctionView auction = model.rowAt(table.convertRowIndexToModel(row));
-        if (auction != null) {
-            openAuction.accept(auction.auctionId());
+        if (!items.isEmpty()) {
+            clockOffset = items.get(0).serverTime() - System.currentTimeMillis();
+        }
+        for (AuctionView auction : items) {
+            grid.add(new AuctionCard(auction, a -> openAuction.accept(a.auctionId()),
+                    editAuction, user.role()));
+        }
+        if (items.isEmpty()) {
+            messageLabel.setText("Chưa có phiên nào trong mục này.");
+            totalLabel.setText("0 phiên");
+        } else {
+            messageLabel.setText(" ");
+            totalLabel.setText(items.size() + " phiên ở trang này");
+        }
+        grid.revalidate();
+        grid.repaint();
+        updatePager();
+        tickCards();
+        if (!clock.isRunning()) {
+            clock.start();
         }
     }
 
-    private void editSelected() {
-        AuctionView auction = selectedAuction();
-        if (auction == null) {
-            setMessage("Hãy chọn một phiên để sửa.");
-            return;
-        }
-        if (auction.status() != AuctionStatus.SCHEDULED) {
-            setMessage("Chỉ sửa được phiên chưa bắt đầu.");
-            return;
-        }
-        if (editAuction != null) {
-            editAuction.accept(auction);
+    private void tickCards() {
+        long serverNow = System.currentTimeMillis() + clockOffset;
+        for (java.awt.Component component : grid.getComponents()) {
+            if (component instanceof AuctionCard card) {
+                card.tick(serverNow);
+            }
         }
     }
 
-    private AuctionView selectedAuction() {
-        int row = table.getSelectedRow();
-        return row < 0 ? null : model.rowAt(table.convertRowIndexToModel(row));
-    }
-
-    private void updateEditButton() {
-        AuctionView auction = selectedAuction();
-        editButton.setEnabled(!loading && editAuction != null
-                && auction != null && auction.status() == AuctionStatus.SCHEDULED);
-        createButton.setEnabled(!loading && createAuction != null);
+    /** Dừng đồng hồ khi màn hình bị gỡ. */
+    void close() {
+        clock.stop();
     }
 
     private void updatePager() {
         pageLabel.setText("Trang " + page);
-        statusFilter.setEnabled(!loading);
-        refreshButton.setEnabled(!loading);
         previousButton.setEnabled(!loading && page > 1);
         nextButton.setEnabled(!loading && hasMore);
-        updateEditButton();
+        for (java.awt.Component component : filterBar.getComponents()) {
+            component.setEnabled(!loading);
+        }
     }
 
-    private void setMessage(String message) {
-        messageLabel.setText(message == null || message.isBlank() ? " " : message);
-    }
-
-    /** Lọc trạng thái; {@code null} nghĩa là tất cả. */
+    /** Bộ lọc trạng thái; {@code null} nghĩa là tất cả. */
     private enum StatusFilter {
         ALL("Tất cả", null),
-        SCHEDULED("Sắp bắt đầu", AuctionStatus.SCHEDULED),
         ACTIVE("Đang diễn ra", AuctionStatus.ACTIVE),
+        SCHEDULED("Sắp diễn ra", AuctionStatus.SCHEDULED),
         FINISHED("Đã kết thúc", AuctionStatus.FINISHED);
 
         private final String label;
@@ -259,11 +235,6 @@ final class AuctionListPanel extends JPanel {
         StatusFilter(String label, AuctionStatus status) {
             this.label = label;
             this.status = status;
-        }
-
-        @Override
-        public String toString() {
-            return label;
         }
     }
 }

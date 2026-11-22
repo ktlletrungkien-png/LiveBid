@@ -3,7 +3,6 @@ package com.livebid.client;
 import com.livebid.client.ui.MainFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
 
 /**
  * Điểm khởi động desktop client (Swing).
@@ -23,7 +22,7 @@ public final class ClientMain {
     }
 
     private static void start() {
-        useSystemLookAndFeel();
+        com.livebid.client.ui.UiTheme.install();
         ClientConfig config;
         try {
             config = ClientConfig.load();
@@ -33,13 +32,5 @@ public final class ClientMain {
             return;
         }
         new MainFrame(config).setVisible(true);
-    }
-
-    private static void useSystemLookAndFeel() {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException e) {
-            // Giữ look-and-feel mặc định của Java; giao diện vẫn dùng được.
-        }
     }
 }
