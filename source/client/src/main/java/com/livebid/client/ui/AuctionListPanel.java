@@ -2,6 +2,7 @@ package com.livebid.client.ui;
 
 import com.google.gson.reflect.TypeToken;
 import com.livebid.client.net.ServerConnection;
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.PageResult;
@@ -16,8 +17,11 @@ import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JToggleButton;
@@ -31,7 +35,8 @@ import javax.swing.border.EmptyBorder;
  *
  * <p>Dữ liệu lấy qua {@code LIST_AUCTIONS}. Yêu cầu chạy trên luồng mạng của {@link ServerConnection}; mọi
  * cập nhật giao diện quay về EDT. Đồng hồ trên các thẻ chạy mỗi giây theo giờ server (lệch giờ được tính
- * từ {@code serverTime} của dữ liệu vừa tải). Bộ lọc và nút phân trang bị khóa trong lúc tải.
+ * từ {@code serverTime} của dữ liệu vừa tải). Ô "Sắp xếp" chọn thứ tự (mặc định: theo nhóm ưu tiên); đổi
+ * bộ lọc hoặc thứ tự thì quay về trang 1. Bộ lọc, ô sắp xếp và nút phân trang bị khóa trong lúc tải.
  */
 final class AuctionListPanel extends JPanel {
 
@@ -54,9 +59,11 @@ final class AuctionListPanel extends JPanel {
     private final JButton previousButton = UiTheme.secondary("‹ Trước");
     private final JButton nextButton = UiTheme.secondary("Sau ›");
     private final JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+    private final JComboBox<SortOption> sortBox = new JComboBox<>(SortOption.values());
     private final Timer clock = new Timer(1_000, e -> tickCards());
 
     private StatusFilter filter = StatusFilter.ALL;
+    private SortOption sort = SortOption.DEFAULT;
     private int page = 1;
     private boolean hasMore;
     private boolean loading;
@@ -122,8 +129,45 @@ final class AuctionListPanel extends JPanel {
             group.add(pill);
             filterBar.add(pill);
         }
-        header.add(filterBar, BorderLayout.CENTER);
+        JPanel controls = new JPanel(new BorderLayout(12, 0));
+        controls.setOpaque(false);
+        controls.add(filterBar, BorderLayout.CENTER);
+        controls.add(buildSortControl(), BorderLayout.EAST);
+        header.add(controls, BorderLayout.CENTER);
         return header;
+    }
+
+    private JPanel buildSortControl() {
+        sortBox.setSelectedItem(sort);
+        sortBox.setFont(UiTheme.sans(java.awt.Font.PLAIN, 13f));
+        sortBox.setRenderer(new DefaultListCellRenderer() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                Object text = value instanceof SortOption option ? option.label : value;
+                return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
+            }
+        });
+        sortBox.addActionListener(e -> {
+            SortOption chosen = (SortOption) sortBox.getSelectedItem();
+            if (chosen == null || chosen == sort) {
+                return;
+            }
+            if (loading) {
+                sortBox.setSelectedItem(sort);
+                return;
+            }
+            sort = chosen;
+            load(1);
+        });
+
+        JPanel wrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        wrap.setOpaque(false);
+        wrap.add(UiTheme.muted("Sắp xếp:"));
+        wrap.add(sortBox);
+        return wrap;
     }
 
     private void selectCurrentFilter() {
@@ -157,7 +201,7 @@ final class AuctionListPanel extends JPanel {
 
         AuctionStatus status = filter.status;
         connection.<PageResult<AuctionView>>call(MessageType.LIST_AUCTIONS,
-                        new ListAuctionsPayload(status, requestedPage, PAGE_SIZE), PAGE_OF_AUCTIONS)
+                        new ListAuctionsPayload(status, sort.sort, requestedPage, PAGE_SIZE), PAGE_OF_AUCTIONS)
                 .whenComplete((result, error) -> SwingUtilities.invokeLater(() -> {
                     loading = false;
                     if (error != null) {
@@ -219,6 +263,24 @@ final class AuctionListPanel extends JPanel {
         nextButton.setEnabled(!loading && hasMore);
         for (java.awt.Component component : filterBar.getComponents()) {
             component.setEnabled(!loading);
+        }
+        sortBox.setEnabled(!loading);
+    }
+
+    /** Lựa chọn trong ô "Sắp xếp". */
+    private enum SortOption {
+        DEFAULT("Mặc định (ưu tiên)", AuctionSort.DEFAULT),
+        ENDS_SOONEST("Kết thúc sớm nhất", AuctionSort.ENDS_SOONEST),
+        ENDS_LATEST("Kết thúc muộn nhất", AuctionSort.ENDS_LATEST),
+        STARTS_SOONEST("Bắt đầu sớm nhất", AuctionSort.STARTS_SOONEST),
+        STARTS_LATEST("Bắt đầu muộn nhất", AuctionSort.STARTS_LATEST);
+
+        private final String label;
+        private final AuctionSort sort;
+
+        SortOption(String label, AuctionSort sort) {
+            this.label = label;
+            this.sort = sort;
         }
     }
 

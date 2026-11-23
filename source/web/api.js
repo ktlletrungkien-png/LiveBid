@@ -100,9 +100,11 @@ const api = {
         return request("PUT", "/api/me", profile);
     },
 
-    listAuctions(status, page, pageSize) {
+    // sort: DEFAULT | ENDS_SOONEST | ENDS_LATEST | STARTS_SOONEST | STARTS_LATEST (bỏ trống = DEFAULT)
+    listAuctions(status, page, pageSize, sort) {
         const filterStatus = status && status !== "ALL" ? status : null;
-        return request("GET", "/api/auctions" + query({ status: filterStatus, page, pageSize }));
+        const sortParam = sort && sort !== "DEFAULT" ? sort : null;
+        return request("GET", "/api/auctions" + query({ status: filterStatus, sort: sortParam, page, pageSize }));
     },
 
     getAuction(id) {

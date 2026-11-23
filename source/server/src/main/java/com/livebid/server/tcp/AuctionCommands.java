@@ -68,9 +68,9 @@ public final class AuctionCommands {
         requireLogin(session);
         ListAuctionsPayload p = request.payloadAs(ListAuctionsPayload.class);
         if (p == null) {
-            return auctions.listAuctions(null, 1, DEFAULT_PAGE_SIZE);
+            return auctions.listAuctions(null, null, 1, DEFAULT_PAGE_SIZE);
         }
-        return auctions.listAuctions(p.status(), p.page(), p.pageSize());
+        return auctions.listAuctions(p.status(), p.sort(), p.page(), p.pageSize());
     }
 
     private CompletableFuture<AuctionView> getAuction(ClientChannel session, Message request)

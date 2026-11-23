@@ -85,6 +85,13 @@
         .pills button[aria-pressed="true"] { background: var(--primary-subdued); border-color: var(--primary-subdued); color: var(--primary-deep); font-weight: 600; }
         .btn-small { padding: 8px 14px !important; font-size: 14px !important; }
 
+        /* Thanh lọc: pill trạng thái bên trái, ô sắp xếp bên phải (xuống dòng khi hẹp) */
+        .list-controls { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-sm) var(--sp-lg); flex-wrap: wrap; }
+        .sort-control { display: flex; align-items: center; gap: var(--sp-sm); }
+        .sort-control select { background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline-input); border-radius: var(--r-sm);
+            padding: var(--sp-sm) var(--sp-md); font: 400 14px var(--font); min-height: 40px; cursor: pointer; }
+        .sort-control select:focus { outline: none; border-color: var(--primary); }
+
         /* Lưới phiên */
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--sp-xl); }
         .auction { display: flex; flex-direction: column; gap: var(--sp-md); padding: var(--sp-xl); transition: box-shadow .15s, transform .15s; }

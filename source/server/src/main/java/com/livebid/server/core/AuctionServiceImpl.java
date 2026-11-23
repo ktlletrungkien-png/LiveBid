@@ -1,6 +1,7 @@
 package com.livebid.server.core;
 
 import com.livebid.common.dto.AuctionDraft;
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.BidReceipt;
@@ -115,14 +116,15 @@ public final class AuctionServiceImpl implements AuctionService {
     // ================================================================== tra cứu
 
     @Override
-    public CompletableFuture<PageResult<AuctionView>> listAuctions(AuctionStatus status, int page, int pageSize) {
+    public CompletableFuture<PageResult<AuctionView>> listAuctions(AuctionStatus status, AuctionSort sort, int page,
+            int pageSize) {
         return executor.submit(() -> {
             if (page < 1 || page > MAX_PAGE) {
                 throw validation("page phải từ 1 đến " + MAX_PAGE);
             }
             checkPageSize(pageSize, "pageSize");
             long now = clock.millis();
-            List<Auction> rows = auctions.findPublicPage(status, (page - 1) * pageSize, pageSize + 1);
+            List<Auction> rows = auctions.findPublicPage(status, sort, (page - 1) * pageSize, pageSize + 1);
             boolean hasMore = rows.size() > pageSize;
             List<AuctionView> items = rows.stream().limit(pageSize).map(a -> toView(a, now, false)).toList();
             return new PageResult<>(items, page, pageSize, hasMore);

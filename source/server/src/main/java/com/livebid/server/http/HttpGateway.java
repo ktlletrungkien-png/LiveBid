@@ -2,6 +2,7 @@ package com.livebid.server.http;
 
 import com.google.gson.JsonParseException;
 import com.livebid.common.dto.AuctionDraft;
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.LoginResult;
 import com.livebid.common.Protocol;
@@ -295,8 +296,9 @@ public final class HttpGateway implements AutoCloseable {
     private void listAuctions(Context ctx) {
         AuctionStatus status = enumParam(ctx, "status", AuctionStatus.class);
         int page = intParam(ctx, "page", DEFAULT_PAGE);
+        AuctionSort sort = enumParam(ctx, "sort", AuctionSort.class);
         int pageSize = intParam(ctx, "pageSize", DEFAULT_PAGE_SIZE);
-        respond(ctx, 200, auctions.listAuctions(status, page, pageSize));
+        respond(ctx, 200, auctions.listAuctions(status, sort, page, pageSize));
     }
 
     private void getAuction(Context ctx) {

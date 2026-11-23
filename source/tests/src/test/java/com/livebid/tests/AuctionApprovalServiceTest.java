@@ -86,8 +86,8 @@ class AuctionApprovalServiceTest {
         assertEquals(Role.USER, pending.ownerRole());
 
         // Không lộ cho người lạ và danh sách công khai
-        assertTrue(service.listAuctions(null, 1, 20).join().items().isEmpty());
-        assertTrue(service.listAuctions(AuctionStatus.PENDING_APPROVAL, 1, 20).join().items().isEmpty());
+        assertTrue(service.listAuctions(null, null, 1, 20).join().items().isEmpty());
+        assertTrue(service.listAuctions(AuctionStatus.PENDING_APPROVAL, null, 1, 20).join().items().isEmpty());
         assertEquals(ErrorCode.AUCTION_NOT_FOUND, rejection(service.getAuction(bob, pending.auctionId())));
         assertEquals(ErrorCode.AUCTION_NOT_FOUND, rejection(service.joinAuction(bob, bobChannel, pending.auctionId())));
         assertEquals(ErrorCode.VALIDATION_ERROR, rejection(service.joinAuction(alice, aliceChannel, pending.auctionId())));
@@ -96,7 +96,7 @@ class AuctionApprovalServiceTest {
         AuctionView approved = service.approveAuction(admin, pending.auctionId()).join();
         assertEquals(AuctionStatus.SCHEDULED, approved.status());
         assertEquals(pending.version() + 1, approved.version());
-        assertEquals(1, service.listAuctions(null, 1, 20).join().items().size());
+        assertEquals(1, service.listAuctions(null, null, 1, 20).join().items().size());
 
         // Đến giờ mở: Bob đặt giá được, Alice (chủ phiên) bị OWN_AUCTION
         clock.set(startsAt);

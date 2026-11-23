@@ -199,7 +199,14 @@ function loginView() {
 
 const FILTERS = [["ALL", "Tất cả"], ["ACTIVE", "Đang diễn ra"], ["SCHEDULED", "Sắp diễn ra"], ["FINISHED", "Đã kết thúc"]];
 const PAGE_SIZE = 6;
-const listState = { filter: "ALL", page: 1 };
+const SORTS = [
+    ["DEFAULT", "Mặc định (ưu tiên)"],
+    ["ENDS_SOONEST", "Kết thúc sớm nhất"],
+    ["ENDS_LATEST", "Kết thúc muộn nhất"],
+    ["STARTS_SOONEST", "Bắt đầu sớm nhất"],
+    ["STARTS_LATEST", "Bắt đầu muộn nhất"],
+];
+const listState = { filter: "ALL", sort: "DEFAULT", page: 1 };
 
 // Cập nhật mọi đồng hồ .countdown[data-target] trong node mỗi giây (dùng cho danh sách)
 function startCountdowns(root, interval = SECOND) {
@@ -239,6 +246,15 @@ function auctionCard(a) {
 async function listView() {
     const node = el("div");
     const filters = el("div", { class: "pills", role: "group", "aria-label": "Lọc theo trạng thái" });
+    const sortSelect = el("select", {
+        id: "auction-sort",
+        onchange: () => { listState.sort = sortSelect.value; listState.page = 1; load(); },
+    }, SORTS.map(([value, label]) => el("option", { value, text: label })));
+    sortSelect.value = listState.sort;
+    const controls = el("div", { class: "list-controls" },
+        filters,
+        el("label", { class: "sort-control", for: "auction-sort" },
+            el("span", { class: "muted", text: "Sắp xếp:" }), sortSelect));
     const total = el("span", { class: "muted" });
     const grid = el("div", { class: "grid" });
     const pager = el("div", { class: "pager" });
@@ -247,12 +263,12 @@ async function listView() {
 
     node.append(
         el("div", { class: "page-head" }, el("h2", { text: "Phiên đấu giá" }), total),
-        el("div", { class: "stack" }, filters, grid, pager));
+        el("div", { class: "stack" }, controls, grid, pager));
 
     async function load() {
         grid.setAttribute("aria-busy", "true");
         try {
-            const result = await api.listAuctions(listState.filter, listState.page, PAGE_SIZE);
+            const result = await api.listAuctions(listState.filter, listState.page, PAGE_SIZE, listState.sort);
             if (!alive) return;
             if (!result.items.length && listState.page > 1) {
                 listState.page--;

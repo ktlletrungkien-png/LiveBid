@@ -1,5 +1,6 @@
 package com.livebid.server.repo.memory;
 
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.server.model.Auction;
 import com.livebid.server.model.NewAuction;
@@ -45,14 +46,46 @@ public final class InMemoryAuctionRepository implements AuctionRepository {
     }
 
     @Override
-    public List<Auction> findPublicPage(AuctionStatus status, int offset, int limit) {
+    public List<Auction> findPublicPage(AuctionStatus status, AuctionSort sort, int offset, int limit) {
         if (status == AuctionStatus.PENDING_APPROVAL || status == AuctionStatus.REJECTED) {
             return List.of();
         }
-        return sorted(byId.values().stream()
+        return byId.values().stream()
                 .filter(a -> isPublicStatus(a.status()))
-                .filter(a -> status == null || a.status() == status))
-                .stream().skip(offset).limit(limit).toList();
+                .filter(a -> status == null || a.status() == status)
+                .sorted(publicOrder(sort))
+                .skip(offset).limit(limit).toList();
+    }
+
+    /** Cùng thứ tự với bản SQLite ({@code SqliteAuctionRepository#publicOrder}). */
+    private static Comparator<Auction> publicOrder(AuctionSort sort) {
+        Comparator<Auction> byId = Comparator.comparingLong(Auction::id);
+        return switch (sort == null ? AuctionSort.DEFAULT : sort) {
+            case DEFAULT -> Comparator.comparingInt((Auction a) -> statusRank(a.status()))
+                    .thenComparingLong(InMemoryAuctionRepository::defaultTimeKey)
+                    .thenComparing(byId);
+            case ENDS_SOONEST -> Comparator.comparingLong(Auction::endsAt).thenComparing(byId);
+            case ENDS_LATEST -> Comparator.comparingLong(Auction::endsAt).reversed().thenComparing(byId);
+            case STARTS_SOONEST -> Comparator.comparingLong(Auction::startsAt).thenComparing(byId);
+            case STARTS_LATEST -> Comparator.comparingLong(Auction::startsAt).reversed().thenComparing(byId);
+        };
+    }
+
+    private static int statusRank(AuctionStatus status) {
+        return switch (status) {
+            case ACTIVE -> 0;
+            case SCHEDULED -> 1;
+            default -> 2;
+        };
+    }
+
+    /** ACTIVE: ends_at tăng dần; SCHEDULED: starts_at tăng dần; FINISHED: ends_at giảm dần. */
+    private static long defaultTimeKey(Auction a) {
+        return switch (a.status()) {
+            case ACTIVE -> a.endsAt();
+            case SCHEDULED -> a.startsAt();
+            default -> -a.endsAt();
+        };
     }
 
     @Override

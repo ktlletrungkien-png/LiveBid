@@ -1,5 +1,6 @@
 package com.livebid.server.repo;
 
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.server.model.Auction;
 import com.livebid.server.model.NewAuction;
@@ -17,8 +18,9 @@ public interface AuctionRepository {
     /**
      * Danh sách công khai: chỉ gồm {@code SCHEDULED}, {@code ACTIVE}, {@code FINISHED};
      * {@code status} null = cả ba. Nếu truyền {@code PENDING_APPROVAL} hoặc {@code REJECTED} trả rỗng.
+     * Thứ tự theo {@code sort} (null = {@link AuctionSort#DEFAULT}); hòa thì xếp theo {@code id} tăng dần.
      */
-    List<Auction> findPublicPage(AuctionStatus status, int offset, int limit);
+    List<Auction> findPublicPage(AuctionStatus status, AuctionSort sort, int offset, int limit);
 
     /** Toàn bộ phiên ở một trạng thái (scheduler dùng khi khởi động và khi chốt phiên quá hạn). */
     List<Auction> findByStatus(AuctionStatus status);

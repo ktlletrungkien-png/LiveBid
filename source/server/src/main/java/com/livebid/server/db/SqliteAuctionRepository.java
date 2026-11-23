@@ -1,5 +1,6 @@
 package com.livebid.server.db;
 
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.server.model.Auction;
 import com.livebid.server.model.NewAuction;
@@ -51,16 +52,32 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     }
 
     @Override
-    public List<Auction> findPublicPage(AuctionStatus status, int offset, int limit) {
+    public List<Auction> findPublicPage(AuctionStatus status, AuctionSort sort, int offset, int limit) {
         if (status == AuctionStatus.PENDING_APPROVAL || status == AuctionStatus.REJECTED) {
             return List.of();
         }
+        String order = publicOrder(sort);
         if (status == null) {
             return query("SELECT " + COLUMNS + " FROM auctions WHERE status IN ('SCHEDULED', 'ACTIVE', 'FINISHED')"
-                    + ORDER + " LIMIT ? OFFSET ?", limit, offset);
+                    + order + " LIMIT ? OFFSET ?", limit, offset);
         }
-        return query("SELECT " + COLUMNS + " FROM auctions WHERE status = ?" + ORDER + " LIMIT ? OFFSET ?",
+        return query("SELECT " + COLUMNS + " FROM auctions WHERE status = ?" + order + " LIMIT ? OFFSET ?",
                 status.name(), limit, offset);
+    }
+
+    /** Mệnh đề ORDER BY cố định cho từng {@link AuctionSort}; không ghép chuỗi từ client. */
+    private static String publicOrder(AuctionSort sort) {
+        return switch (sort == null ? AuctionSort.DEFAULT : sort) {
+            case DEFAULT -> " ORDER BY CASE status WHEN 'ACTIVE' THEN 0 WHEN 'SCHEDULED' THEN 1 ELSE 2 END,"
+                    + " CASE WHEN status = 'ACTIVE' THEN ends_at END,"
+                    + " CASE WHEN status = 'SCHEDULED' THEN starts_at END,"
+                    + " CASE WHEN status = 'FINISHED' THEN ends_at END DESC,"
+                    + " id";
+            case ENDS_SOONEST -> " ORDER BY ends_at, id";
+            case ENDS_LATEST -> " ORDER BY ends_at DESC, id";
+            case STARTS_SOONEST -> " ORDER BY starts_at, id";
+            case STARTS_LATEST -> " ORDER BY starts_at DESC, id";
+        };
     }
 
     @Override

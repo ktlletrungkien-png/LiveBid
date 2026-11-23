@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.Role;
 import com.livebid.common.protocol.ErrorCode;
@@ -22,7 +23,10 @@ import com.livebid.server.model.NewAuction;
 import com.livebid.server.model.NewUser;
 import com.livebid.server.model.SettlementTask;
 import com.livebid.server.model.User;
+import com.livebid.server.repo.AuctionRepository;
 import com.livebid.server.repo.DataAccessException;
+import com.livebid.server.repo.memory.InMemoryAuctionRepository;
+import com.livebid.server.repo.memory.InMemoryBidRepository;
 import java.nio.file.Path;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -317,8 +321,8 @@ class SqliteRepositoryTest {
         Auction pub = auctions.insert(new NewAuction("Công khai", "", 1000, 100, 1000, 3000, adminId, 30,
                 AuctionStatus.SCHEDULED));
 
-        assertEquals(List.of(pub.id()), ids(auctions.findPublicPage(null, 0, 10)));
-        assertTrue(auctions.findPublicPage(AuctionStatus.PENDING_APPROVAL, 0, 10).isEmpty());
+        assertEquals(List.of(pub.id()), ids(auctions.findPublicPage(null, null, 0, 10)));
+        assertTrue(auctions.findPublicPage(AuctionStatus.PENDING_APPROVAL, null, 0, 10).isEmpty());
         assertEquals(List.of(p1.id(), p2.id()), ids(auctions.findPendingApproval()));
         assertEquals(List.of(p2.id(), p1.id()), ids(auctions.findCreatedBy(aliceId)));
         assertEquals(2, auctions.countPendingBy(aliceId));
@@ -330,6 +334,41 @@ class SqliteRepositoryTest {
     }
 
     // Tiện ích
+
+    @Test
+    void publicPageSortsTheSameInSqliteAndMemory() {
+        long ownerId = users.insert(newUser("owner", Role.USER)).id();
+        AuctionRepository memory = new InMemoryAuctionRepository(new InMemoryBidRepository());
+        for (AuctionRepository repo : List.of(auctions, memory)) {
+            // id 1..7 theo thứ tự chèn
+            insert(repo, ownerId, 100, 900, AuctionStatus.FINISHED);   // 1: kết thúc sớm
+            insert(repo, ownerId, 200, 950, AuctionStatus.FINISHED);   // 2: vừa kết thúc
+            insert(repo, ownerId, 300, 5000, AuctionStatus.ACTIVE);    // 3: còn lâu
+            insert(repo, ownerId, 400, 2000, AuctionStatus.ACTIVE);    // 4: sắp hết giờ
+            insert(repo, ownerId, 3000, 9000, AuctionStatus.SCHEDULED); // 5: mở muộn
+            insert(repo, ownerId, 1500, 8000, AuctionStatus.SCHEDULED); // 6: mở sớm
+            insert(repo, ownerId, 1500, 8000, AuctionStatus.PENDING_APPROVAL); // 7: không công khai
+
+            assertEquals(List.of(4L, 3L, 6L, 5L, 2L, 1L), ids(repo.findPublicPage(null, null, 0, 10)));
+            assertEquals(List.of(4L, 3L, 6L, 5L, 2L, 1L),
+                    ids(repo.findPublicPage(null, AuctionSort.DEFAULT, 0, 10)));
+            assertEquals(List.of(1L, 2L, 4L, 3L, 6L, 5L),
+                    ids(repo.findPublicPage(null, AuctionSort.ENDS_SOONEST, 0, 10)));
+            assertEquals(List.of(5L, 6L, 3L, 4L, 2L, 1L),
+                    ids(repo.findPublicPage(null, AuctionSort.ENDS_LATEST, 0, 10)));
+            assertEquals(List.of(1L, 2L, 3L, 4L, 6L, 5L),
+                    ids(repo.findPublicPage(null, AuctionSort.STARTS_SOONEST, 0, 10)));
+            assertEquals(List.of(5L, 6L, 4L, 3L, 2L, 1L),
+                    ids(repo.findPublicPage(null, AuctionSort.STARTS_LATEST, 0, 10)));
+            assertEquals(List.of(2L, 1L), ids(repo.findPublicPage(AuctionStatus.FINISHED, null, 0, 10)));
+            assertEquals(List.of(3L, 6L), ids(repo.findPublicPage(null, AuctionSort.DEFAULT, 1, 2)));
+        }
+    }
+
+    private static void insert(AuctionRepository repo, long ownerId, long startsAt, long endsAt,
+            AuctionStatus status) {
+        repo.insert(new NewAuction("Phiên", "", 1000, 100, startsAt, endsAt, ownerId, 1, status));
+    }
 
     private static NewUser newUser(String username, Role role) {
         return new NewUser(username, "Tên " + username, "hash", "salt", 1000, role, 1L);

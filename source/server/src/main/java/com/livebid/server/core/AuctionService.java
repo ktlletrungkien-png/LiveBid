@@ -1,6 +1,7 @@
 package com.livebid.server.core;
 
 import com.livebid.common.dto.AuctionDraft;
+import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.BidReceipt;
@@ -29,8 +30,12 @@ public interface AuctionService {
 
     // ---------------------------------------------------------------- tra cứu (đã đăng nhập)
 
-    /** {@code status} null = tất cả. {@code page} từ 1; {@code pageSize} 1–50. */
-    CompletableFuture<PageResult<AuctionView>> listAuctions(AuctionStatus status, int page, int pageSize);
+    /**
+     * {@code status} null = tất cả. {@code sort} null = {@link AuctionSort#DEFAULT}.
+     * {@code page} từ 1; {@code pageSize} 1–50.
+     */
+    CompletableFuture<PageResult<AuctionView>> listAuctions(AuctionStatus status, AuctionSort sort, int page,
+            int pageSize);
 
     /**
      * Xem chi tiết phiên. Phiên {@code PENDING_APPROVAL} hoặc {@code REJECTED} chỉ chủ phiên và ADMIN
