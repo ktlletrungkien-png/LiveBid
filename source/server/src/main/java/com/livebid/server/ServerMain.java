@@ -111,7 +111,7 @@ public final class ServerMain {
         tcp.start();
 
         // --- HTTP: REST /api + trang web tĩnh. Dùng chung auth và auctions với TCP.
-        HttpGateway http = new HttpGateway(new HttpGateway.Settings(config.httpPort(), config.webRoot()),
+        HttpGateway http = new HttpGateway(new HttpGateway.Settings(config.httpPort(), config.webRoot(), config.imageDir()),
                 auth, auctions, settlementClient::fetchSummary);
         // WebSocket /ws dùng chung router với TCP; đóng kết nối thì rời phòng như TCP. Phải gọi trước start().
         http.enableWebSocket(router, auctions::onDisconnect);

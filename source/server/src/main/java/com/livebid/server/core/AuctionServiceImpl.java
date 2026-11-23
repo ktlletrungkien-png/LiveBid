@@ -13,6 +13,7 @@ import com.livebid.common.dto.RoomSnapshot;
 import com.livebid.common.protocol.ErrorCode;
 import com.livebid.common.protocol.Message;
 import com.livebid.common.protocol.MessageType;
+import com.livebid.server.image.ImageStore;
 import com.livebid.server.model.Auction;
 import com.livebid.server.model.Bid;
 import com.livebid.server.model.NewAuction;
@@ -296,7 +297,7 @@ public final class AuctionServiceImpl implements AuctionService {
             }
             Auction created = transactions.inTransaction(() -> auctions.insert(new NewAuction(
                     clean.title(), clean.description(), clean.startingPrice(), clean.minIncrement(),
-                    clean.startsAt(), clean.endsAt(), user.userId(), now, initialStatus)));
+                    clean.startsAt(), clean.endsAt(), user.userId(), now, initialStatus, clean.imageId())));
             log.info("{} tạo phiên #{} \"{}\" ({})", user.username(), created.id(), created.title(), initialStatus);
             return toView(created, now, true);
         });
@@ -330,8 +331,11 @@ public final class AuctionServiceImpl implements AuctionService {
             if (!user.isAdmin()) {
                 checkUserLeadTime(clean.startsAt(), now);
             }
+            // imageId null = giữ ảnh cũ, để client chưa biết tới ảnh (Swing) sửa phiên không làm mất ảnh.
+            String imageId = clean.removeImage() ? null
+                    : clean.imageId() != null ? clean.imageId() : current.imageId();
             Auction updated = current.withDetails(clean.title(), clean.description(), clean.startingPrice(),
-                    clean.minIncrement(), clean.startsAt(), clean.endsAt());
+                    clean.minIncrement(), clean.startsAt(), clean.endsAt(), imageId);
             transactions.inTransaction(() -> {
                 auctions.update(updated);
                 return null;
@@ -565,8 +569,11 @@ public final class AuctionServiceImpl implements AuctionService {
         if (draft.endsAt() <= now) {
             throw validation("Giờ kết thúc phải ở tương lai");
         }
+        if (draft.imageId() != null && !ImageStore.isValidId(draft.imageId())) {
+            throw validation("Mã ảnh không hợp lệ");
+        }
         return new AuctionDraft(title, description, draft.startingPrice(), draft.minIncrement(),
-                draft.startsAt(), draft.endsAt());
+                draft.startsAt(), draft.endsAt(), draft.imageId(), draft.removeImage());
     }
 
     private static void checkPrice(long value, String name) {
@@ -614,7 +621,7 @@ public final class AuctionServiceImpl implements AuctionService {
         return new AuctionView(a.id(), a.title(), a.description(), a.status(), a.startingPrice(), a.minIncrement(),
                 a.currentPrice(), a.hasBids(), displayName(a.currentBidderId()), displayName(a.winnerId()),
                 a.startsAt(), a.endsAt(), a.extensionCount(), a.version(), now,
-                a.createdBy(), ownerDisplayName, ownerRole, rejectReason);
+                a.createdBy(), ownerDisplayName, ownerRole, rejectReason, a.imageId());
     }
 
     private BidView toView(Bid b) {

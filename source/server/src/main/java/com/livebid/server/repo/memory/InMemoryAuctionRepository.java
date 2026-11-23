@@ -130,7 +130,7 @@ public final class InMemoryAuctionRepository implements AuctionRepository {
     public Auction insert(NewAuction n) {
         Auction auction = new Auction(nextId.getAndIncrement(), n.title(), n.description(), n.startingPrice(),
                 n.minIncrement(), n.startingPrice(), null, null, n.startsAt(), n.endsAt(), 0,
-                n.initialStatus(), 1, n.createdBy(), n.createdAt(), null, null, null);
+                n.initialStatus(), 1, n.createdBy(), n.createdAt(), null, null, null, n.imageId());
         byId.put(auction.id(), auction);
         return auction;
     }

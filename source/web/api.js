@@ -20,18 +20,20 @@ class ApiError extends Error {
 
 /* ====================== Gọi REST API ====================== */
 
+// body: object -> gửi JSON; Blob/File -> gửi nguyên nội dung file (dùng cho tải ảnh)
 async function request(method, path, body) {
     const headers = { Accept: "application/json" };
     const token = sessionStorage.getItem(TOKEN_KEY);
     if (token) headers.Authorization = "Bearer " + token;
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const raw = body instanceof Blob;
+    if (body !== undefined) headers["Content-Type"] = raw ? (body.type || "application/octet-stream") : "application/json";
 
     let response;
     try {
         response = await fetch(`${location.protocol}//${location.host}${path}`, {
             method,
             headers,
-            body: body === undefined ? undefined : JSON.stringify(body),
+            body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
         });
     } catch {
         throw new ApiError("NETWORK", "Không kết nối được máy chủ. Vui lòng thử lại.");
@@ -125,6 +127,16 @@ const api = {
 
     updateAuction(id, expectedVersion, draft) {
         return request("PUT", "/api/auctions/" + encodeURIComponent(id), { expectedVersion, draft });
+    },
+
+    // POST /api/images  (thân = file ảnh JPEG/PNG/WebP, tối đa 2 MB) -> {imageId}
+    uploadImage(file) {
+        return request("POST", "/api/images", file);
+    },
+
+    // Địa chỉ ảnh để gán vào <img src>; không cần token
+    imageUrl(imageId) {
+        return "/api/images/" + encodeURIComponent(imageId);
     },
 
     cancelAuction(id) {

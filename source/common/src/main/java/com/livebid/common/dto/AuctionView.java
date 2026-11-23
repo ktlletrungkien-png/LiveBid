@@ -15,6 +15,7 @@ package com.livebid.common.dto;
  * @param ownerDisplayName  tên hiển thị của người tạo phiên
  * @param ownerRole         vai trò người tạo ({@code ADMIN} → giao diện hiển thị "Ban tổ chức")
  * @param rejectReason      lý do từ chối khi {@code REJECTED}; chỉ trả cho chủ phiên và ADMIN
+ * @param imageId           ảnh đại diện (tải tại {@code GET /api/images/{imageId}}); null nếu không có
  */
 public record AuctionView(
         long auctionId,
@@ -35,7 +36,8 @@ public record AuctionView(
         long ownerId,
         String ownerDisplayName,
         Role ownerRole,
-        String rejectReason) {
+        String rejectReason,
+        String imageId) {
 
     /** Mức giá thấp nhất được chấp nhận cho bid tiếp theo. */
     public long minimumNextBid() {

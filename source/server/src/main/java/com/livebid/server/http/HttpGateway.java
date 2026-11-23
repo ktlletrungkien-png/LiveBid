@@ -17,11 +17,15 @@ import com.livebid.server.core.AuthService;
 import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.ServiceException;
 import com.livebid.server.core.UserPrincipal;
+import com.livebid.server.image.ImageStore;
 import com.livebid.server.tcp.MessageRouter;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
+import io.javalin.http.HandlerType;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.websocket.WsConfig;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -49,7 +53,8 @@ import org.slf4j.LoggerFactory;
  *   <li>Lỗi: mã HTTP lấy từ {@link ErrorCode#httpStatus()}, body
  *       {@code {"error":{"code":"...","message":"...","details":{...}}}}.</li>
  *   <li>Xác thực: header {@code Authorization: Bearer <token>} cho mọi {@code /api/*} trừ
- *       {@code register} và {@code login}.</li>
+ *       {@code register}, {@code login} và {@code GET /api/images/{id}} (thẻ {@code <img>} không gửi được
+ *       header; mã ảnh ngẫu nhiên 128 bit nên không đoán được).</li>
  *   <li>Kết quả bất đồng bộ được trả bằng {@code ctx.future(...)}; <b>không</b> {@code join()} trên luồng HTTP.</li>
  * </ul>
  */
@@ -68,10 +73,16 @@ public final class HttpGateway implements AutoCloseable {
     private static final Duration WS_IDLE_TIMEOUT = Duration.ofSeconds(45);
 
     /**
-     * @param port    cổng HTTP; 0 = cổng ngẫu nhiên (dùng cho test)
-     * @param webRoot thư mục chứa trang web tĩnh, phục vụ tại {@code /}; không tồn tại thì chỉ chạy API
+     * @param port     cổng HTTP; 0 = cổng ngẫu nhiên (dùng cho test)
+     * @param webRoot  thư mục chứa trang web tĩnh, phục vụ tại {@code /}; không tồn tại thì chỉ chạy API
+     * @param imageDir thư mục lưu ảnh đại diện của phiên (tự tạo khi cần)
      */
-    public record Settings(int port, Path webRoot) {
+    public record Settings(int port, Path webRoot, Path imageDir) {
+
+        /** Ảnh lưu ở thư mục {@code images} cạnh thư mục tạm của hệ điều hành (dùng cho test không cần ảnh). */
+        public Settings(int port, Path webRoot) {
+            this(port, webRoot, Path.of(System.getProperty("java.io.tmpdir"), "livebid-images"));
+        }
     }
 
     /** Body của {@code PUT /api/auctions/{id}}; id lấy từ đường dẫn. */
@@ -90,6 +101,7 @@ public final class HttpGateway implements AutoCloseable {
     private final AuthService auth;
     private final AuctionService auctions;
     private final Supplier<Optional<SettlementSummaryDto>> stats;
+    private final ImageStore images;
     /** Kênh WebSocket đang mở, khóa theo mã session của Jetty. */
     private final Map<String, WsChannel> channels = new ConcurrentHashMap<>();
     private MessageRouter router;
@@ -106,6 +118,7 @@ public final class HttpGateway implements AutoCloseable {
         this.auth = Objects.requireNonNull(auth);
         this.auctions = Objects.requireNonNull(auctions);
         this.stats = Objects.requireNonNull(stats);
+        this.images = new ImageStore(settings.imageDir());
     }
 
     /**
@@ -192,6 +205,8 @@ public final class HttpGateway implements AutoCloseable {
         app.post("/api/auctions/{id}/reject", this::rejectAuction);
         app.get("/api/auctions/{id}/bids", this::bidHistory);
         app.get("/api/stats", this::stats);
+        app.post("/api/images", this::uploadImage);
+        app.get("/api/images/{imageId}", this::getImage);
 
         if (router != null) {
             app.ws("/ws", this::configureWebSocket);
@@ -207,6 +222,9 @@ public final class HttpGateway implements AutoCloseable {
     private void authenticate(Context ctx) {
         String path = ctx.path();
         if (path.equals("/api/register") || path.equals("/api/login")) {
+            return;
+        }
+        if (ctx.method() == HandlerType.GET && path.startsWith("/api/images/")) {
             return;
         }
         String header = ctx.header("Authorization");
@@ -322,13 +340,56 @@ public final class HttpGateway implements AutoCloseable {
 
     private void createAuction(Context ctx) {
         AuctionDraft draft = body(ctx, AuctionDraft.class);
+        requireStoredImage(draft);
         respond(ctx, 201, auctions.createAuction(principal(ctx), draft));
     }
 
     private void updateAuction(Context ctx) {
         long id = auctionId(ctx);
         UpdateBody body = body(ctx, UpdateBody.class);
+        requireStoredImage(body.draft());
         respond(ctx, 200, auctions.updateAuction(principal(ctx), id, body.expectedVersion(), body.draft()));
+    }
+
+    /** Ảnh gắn vào phiên phải là ảnh đã tải lên kho (tránh gắn mã ảnh không tồn tại). */
+    private void requireStoredImage(AuctionDraft draft) {
+        if (draft != null && draft.imageId() != null && !draft.removeImage() && !images.exists(draft.imageId())) {
+            throw validation("Ảnh không tồn tại, hãy tải ảnh lên lại");
+        }
+    }
+
+    // ---------------------------------------------------------------- ảnh đại diện
+
+    /**
+     * {@code POST /api/images}: thân yêu cầu là nội dung file ảnh (không phải multipart), tối đa
+     * {@link ImageStore#MAX_BYTES}. Trả {@code 201 {"imageId": "..."}}; dùng mã này trong {@code AuctionDraft}.
+     */
+    private void uploadImage(Context ctx) throws IOException {
+        principal(ctx);
+        long declared = ctx.contentLength();
+        if (declared > ImageStore.MAX_BYTES) {
+            throw validation("Ảnh tối đa " + (ImageStore.MAX_BYTES / 1024 / 1024) + " MB");
+        }
+        String imageId;
+        try (InputStream in = ctx.bodyInputStream()) {
+            imageId = images.save(in);
+        } catch (ImageStore.InvalidImageException e) {
+            throw validation(e.getMessage());
+        }
+        respondNow(ctx, 201, Map.of("imageId", imageId));
+    }
+
+    /** {@code GET /api/images/{imageId}}: trả file ảnh; ảnh không bao giờ đổi nên cho cache lâu. */
+    private void getImage(Context ctx) throws IOException {
+        String imageId = ctx.pathParam("imageId");
+        Optional<Path> file = images.find(imageId);
+        if (file.isEmpty()) {
+            ctx.status(404);
+            return;
+        }
+        ctx.header("Cache-Control", "public, max-age=31536000, immutable");
+        ctx.header("X-Content-Type-Options", "nosniff");
+        ctx.contentType(ImageStore.contentType(imageId)).result(Files.readAllBytes(file.get()));
     }
 
     private void cancelAuction(Context ctx) {
