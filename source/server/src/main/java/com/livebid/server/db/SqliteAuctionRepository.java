@@ -25,7 +25,7 @@ public final class SqliteAuctionRepository implements AuctionRepository {
 
     private static final String COLUMNS = "id, title, description, starting_price, min_increment, current_price, "
             + "current_bidder_id, winner_id, starts_at, ends_at, extension_count, status, version, created_by, "
-            + "created_at, reject_reason, reviewed_by, reviewed_at";
+            + "created_at, reject_reason, reviewed_by, reviewed_at, image_id";
     private static final String ORDER = " ORDER BY starts_at, id";
     private static final String PENDING_ORDER = " ORDER BY created_at, id";
     private static final String CREATED_ORDER = " ORDER BY created_at DESC, id DESC";
@@ -126,8 +126,8 @@ public final class SqliteAuctionRepository implements AuctionRepository {
     public Auction insert(NewAuction n) {
         String sql = "INSERT INTO auctions (title, description, starting_price, min_increment, current_price, "
                 + "current_bidder_id, winner_id, starts_at, ends_at, extension_count, status, version, "
-                + "created_by, created_at, reject_reason, reviewed_by, reviewed_at) "
-                + "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, 0, ?, 1, ?, ?, NULL, NULL, NULL)";
+                + "created_by, created_at, reject_reason, reviewed_by, reviewed_at, image_id) "
+                + "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, 0, ?, 1, ?, ?, NULL, NULL, NULL, ?)";
         try (PreparedStatement ps = db.connection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, n.title());
             ps.setString(2, n.description());
@@ -139,12 +139,13 @@ public final class SqliteAuctionRepository implements AuctionRepository {
             ps.setString(8, n.initialStatus().name());
             ps.setLong(9, n.createdBy());
             ps.setLong(10, n.createdAt());
+            setNullableString(ps, 11, n.imageId());
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();
                 return new Auction(keys.getLong(1), n.title(), n.description(), n.startingPrice(),
                         n.minIncrement(), n.startingPrice(), null, null, n.startsAt(), n.endsAt(), 0,
-                        n.initialStatus(), 1, n.createdBy(), n.createdAt(), null, null, null);
+                        n.initialStatus(), 1, n.createdBy(), n.createdAt(), null, null, null, n.imageId());
             }
         } catch (SQLException e) {
             throw new DataAccessException("Không thêm được phiên đấu giá", e);
@@ -156,7 +157,7 @@ public final class SqliteAuctionRepository implements AuctionRepository {
         String sql = "UPDATE auctions SET title = ?, description = ?, starting_price = ?, min_increment = ?, "
                 + "current_price = ?, current_bidder_id = ?, winner_id = ?, starts_at = ?, ends_at = ?, "
                 + "extension_count = ?, status = ?, version = ?, created_by = ?, created_at = ?, "
-                + "reject_reason = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?";
+                + "reject_reason = ?, reviewed_by = ?, reviewed_at = ?, image_id = ? WHERE id = ?";
         try (PreparedStatement ps = db.connection().prepareStatement(sql)) {
             ps.setString(1, a.title());
             ps.setString(2, a.description());
@@ -172,14 +173,11 @@ public final class SqliteAuctionRepository implements AuctionRepository {
             ps.setLong(12, a.version());
             ps.setLong(13, a.createdBy());
             ps.setLong(14, a.createdAt());
-            if (a.rejectReason() == null) {
-                ps.setNull(15, java.sql.Types.VARCHAR);
-            } else {
-                ps.setString(15, a.rejectReason());
-            }
+            setNullableString(ps, 15, a.rejectReason());
             setNullableLong(ps, 16, a.reviewedBy());
             setNullableLong(ps, 17, a.reviewedAt());
-            ps.setLong(18, a.id());
+            setNullableString(ps, 18, a.imageId());
+            ps.setLong(19, a.id());
             if (ps.executeUpdate() == 0) {
                 throw new DataAccessException("Không có phiên " + a.id(), null);
             }
@@ -217,6 +215,14 @@ public final class SqliteAuctionRepository implements AuctionRepository {
         }
     }
 
+    private static void setNullableString(PreparedStatement ps, int index, String value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, java.sql.Types.VARCHAR);
+        } else {
+            ps.setString(index, value);
+        }
+    }
+
     private static void setNullableLong(PreparedStatement ps, int index, Long value) throws SQLException {
         if (value == null) {
             ps.setNull(index, java.sql.Types.INTEGER);
@@ -248,7 +254,8 @@ public final class SqliteAuctionRepository implements AuctionRepository {
                 rs.getLong("created_at"),
                 rs.getString("reject_reason"),
                 reviewedBy,
-                reviewedAt);
+                reviewedAt,
+                rs.getString("image_id"));
     }
 
     private static Long nullableLong(ResultSet rs, String column) throws SQLException {

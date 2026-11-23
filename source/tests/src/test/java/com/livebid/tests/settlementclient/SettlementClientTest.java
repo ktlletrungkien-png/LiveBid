@@ -201,7 +201,7 @@ class SettlementClientTest {
     private static AuctionView view(long auctionId) {
         return new AuctionView(auctionId, "Bàn phím cơ", "", AuctionStatus.FINISHED, START_PRICE, STEP,
                 START_PRICE, false, null, null, NOW - 60_000, NOW + 60_000, 0, 1, NOW,
-                1L, "Ban tổ chức", Role.ADMIN, null);
+                1L, "Ban tổ chức", Role.ADMIN, null, null);
     }
 
     private SettlementClient newClient(SettlementServiceLocator locator) {

@@ -76,7 +76,7 @@ class SqliteRepositoryTest {
         db = SqliteDatabase.open(dir.resolve("test.db"));
 
         assertEquals(1, scalar("SELECT COUNT(*) FROM schema_version"));
-        assertEquals(2, scalar("SELECT version FROM schema_version"));
+        assertEquals(3, scalar("SELECT version FROM schema_version"));
         for (String table : List.of("users", "auctions", "bids", "settlement_queue")) {
             assertEquals(1, scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '" + table + "'"),
                     "thiếu bảng " + table);
@@ -287,6 +287,7 @@ class SqliteRepositoryTest {
             assertEquals("Phiên cũ", old.title());
             assertEquals(AuctionStatus.FINISHED, old.status());
             assertNull(old.rejectReason());
+            assertNull(old.imageId());
 
             Auction pending = repo.insert(new NewAuction("Phiên mới", "", 2000, 100, 300, 400, 2, 60,
                     AuctionStatus.PENDING_APPROVAL));
@@ -295,7 +296,7 @@ class SqliteRepositoryTest {
             try (Statement st = migrated.connection().createStatement();
                  ResultSet rs = st.executeQuery("SELECT version FROM schema_version")) {
                 rs.next();
-                assertEquals(2, rs.getInt(1));
+                assertEquals(3, rs.getInt(1));
             }
         }
 
@@ -305,7 +306,7 @@ class SqliteRepositoryTest {
              ResultSet rs = st.executeQuery("SELECT COUNT(*), MAX(version) FROM schema_version")) {
             rs.next();
             assertEquals(1, rs.getInt(1));
-            assertEquals(2, rs.getInt(2));
+            assertEquals(3, rs.getInt(2));
         }
     }
 
@@ -363,6 +364,25 @@ class SqliteRepositoryTest {
             assertEquals(List.of(2L, 1L), ids(repo.findPublicPage(AuctionStatus.FINISHED, null, 0, 10)));
             assertEquals(List.of(3L, 6L), ids(repo.findPublicPage(null, AuctionSort.DEFAULT, 1, 2)));
         }
+    }
+
+    @Test
+    void imageIdIsStoredAndUpdated() {
+        long ownerId = users.insert(newUser("owner", Role.USER)).id();
+        String imageId = "a".repeat(32) + ".jpg";
+        Auction created = auctions.insert(new NewAuction("Có ảnh", "", 1000, 100, 2000, 3000, ownerId, 1,
+                AuctionStatus.SCHEDULED, imageId));
+        assertEquals(imageId, auctions.findById(created.id()).orElseThrow().imageId());
+
+        Auction withoutImage = created.withDetails("Có ảnh", "", 1000, 100, 2000, 3000, null);
+        auctions.update(withoutImage);
+        assertNull(auctions.findById(created.id()).orElseThrow().imageId());
+
+        // Các thay đổi khác (mở phiên) không làm mất ảnh
+        Auction again = auctions.insert(new NewAuction("Có ảnh 2", "", 1000, 100, 2000, 3000, ownerId, 1,
+                AuctionStatus.SCHEDULED, imageId));
+        auctions.update(again.withStatus(AuctionStatus.ACTIVE, null));
+        assertEquals(imageId, auctions.findById(again.id()).orElseThrow().imageId());
     }
 
     private static void insert(AuctionRepository repo, long ownerId, long startsAt, long endsAt,

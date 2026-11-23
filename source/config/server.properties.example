@@ -21,3 +21,4 @@ auth.pbkdf2Iterations=600000
 auction.announceLeadSeconds=300
 auction.snapshotBidCount=20
 http.webRoot=web
+http.imageDir=./data/images

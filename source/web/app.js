@@ -228,6 +228,7 @@ function auctionCard(a) {
     if (!hasTimer) timer.textContent = formatDateTime(a.endsAt);
 
     return el("article", { class: "card auction" },
+        auctionThumb(a.imageId, a.title),
         el("div", {}, statusTag(a.status)),
         el("h3", { text: a.title }),
         el("span", { class: "muted", text: ownerName(a) }),
@@ -354,6 +355,7 @@ function auctionForm({ auction, submitLabel, onSubmit, onCancel }) {
         endsAt: field({ id: "endsAt", label: "Giờ kết thúc", type: "datetime-local", value: toLocalInput(auction ? auction.endsAt : defaultStart + 24 * 60 * MINUTE) }),
     };
     for (const key of ["title", "description"]) fields[key].wrap.classList.add("full");
+    const image = imageField(auction && auction.imageId);
 
     const formError = el("p", { class: "form-error full", role: "alert" });
     const submit = el("button", { class: "btn-primary", type: "submit", text: submitLabel });
@@ -362,13 +364,15 @@ function auctionForm({ auction, submitLabel, onSubmit, onCancel }) {
     const note = !isAdmin() ? el("p", { class: "muted full", style: "margin:0", text: "Phiên sẽ được quản trị viên duyệt trước khi lên sàn." }) : null;
 
     const form = el("form", { class: "form-grid", novalidate: true },
-        Object.values(fields).map((f) => f.wrap), formError, actions, note);
+        Object.values(fields).map((f) => f.wrap), image.wrap, formError, actions, note);
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const { errors, draft } = validateDraft(fields);
         for (const [key, f] of Object.entries(fields)) f.setError(errors[key]);
         if (Object.keys(errors).length) return;
+        if (image.isUploading()) { formError.textContent = "Ảnh đang được tải lên, vui lòng đợi."; return; }
+        Object.assign(draft, image.draftFields());
         submit.disabled = true;
         formError.textContent = "";
         try {
@@ -379,6 +383,95 @@ function auctionForm({ auction, submitLabel, onSubmit, onCancel }) {
         }
     });
     return form;
+}
+
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+// Khung ảnh 4:3; imageId rỗng thì hiện "Chưa có ảnh"
+function auctionThumb(imageId, title) {
+    return el("div", { class: "thumb" }, imageId
+        ? el("img", { src: api.imageUrl(imageId), alt: title ? "Ảnh " + title : "Ảnh phiên", loading: "lazy" })
+        : el("span", { class: "thumb-empty", text: "Chưa có ảnh" }));
+}
+
+// Ô chọn ảnh đại diện: chọn là tải lên ngay để lấy imageId, có xem trước và nút bỏ ảnh.
+// draftFields(): khi sửa, không đổi ảnh -> {} (server giữ ảnh cũ); đổi -> {imageId}; bỏ -> {removeImage: true}.
+function imageField(initialImageId) {
+    let imageId = initialImageId || null;
+    let uploading = false;
+    let previewUrl = null;
+
+    const input = el("input", { type: "file", id: "image", accept: IMAGE_TYPES.join(","), hidden: true });
+    const preview = el("div");
+    const chooseBtn = el("button", { class: "btn-secondary btn-small", type: "button", onclick: () => input.click() });
+    const removeBtn = el("button", { class: "btn-secondary btn-small", type: "button", text: "Bỏ ảnh" });
+    const status = el("span", { class: "muted" });
+    const error = el("p", { class: "field-error", id: "image-error", role: "alert" });
+    const wrap = el("div", { class: "field image-field full" },
+        el("label", { for: "image", text: "Ảnh đại diện (không bắt buộc)" }),
+        preview, input,
+        el("div", { class: "row" }, chooseBtn, removeBtn, status),
+        el("span", { class: "muted", text: "JPEG, PNG hoặc WebP, tối đa 2 MB." }),
+        error);
+
+    function draw(src) {
+        preview.replaceChildren(el("div", { class: "thumb" }, src
+            ? el("img", { src, alt: "Xem trước ảnh" })
+            : el("span", { class: "thumb-empty", text: "Chưa có ảnh" })));
+        chooseBtn.textContent = src ? "Đổi ảnh" : "Chọn ảnh";
+        removeBtn.hidden = !src;
+        chooseBtn.disabled = removeBtn.disabled = uploading;
+    }
+
+    function setPreview(url) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = url;
+    }
+
+    input.addEventListener("change", async () => {
+        const file = input.files[0];
+        input.value = ""; // cho phép chọn lại cùng file
+        if (!file) return;
+        error.textContent = "";
+        if (!IMAGE_TYPES.includes(file.type)) { error.textContent = "Chỉ nhận ảnh JPEG, PNG hoặc WebP."; return; }
+        if (file.size > IMAGE_MAX_BYTES) { error.textContent = "Ảnh tối đa 2 MB."; return; }
+
+        const previous = imageId;
+        uploading = true;
+        status.textContent = "Đang tải ảnh lên...";
+        setPreview(URL.createObjectURL(file));
+        draw(previewUrl);
+        try {
+            imageId = (await api.uploadImage(file)).imageId;
+            status.textContent = "";
+        } catch (err) {
+            imageId = previous;
+            setPreview(null);
+            status.textContent = "";
+            error.textContent = errorText(err);
+        } finally {
+            uploading = false;
+            draw(previewUrl || (imageId ? api.imageUrl(imageId) : null));
+        }
+    });
+
+    removeBtn.addEventListener("click", () => {
+        imageId = null;
+        setPreview(null);
+        error.textContent = "";
+        draw(null);
+    });
+
+    draw(imageId ? api.imageUrl(imageId) : null);
+    return {
+        wrap,
+        isUploading: () => uploading,
+        draftFields() {
+            if (imageId === (initialImageId || null)) return {};
+            return imageId ? { imageId } : { removeImage: true };
+        },
+    };
 }
 
 function createView() {
@@ -419,7 +512,7 @@ async function auctionView(idParam) {
             el("div", {}, el("dt", { text: "Kết thúc" }), endsEl));
         endsEl.textContent = formatDateTime(s.endsAt);
     };
-    details.append(statusSlot,
+    details.append(s.imageId ? auctionThumb(s.imageId, s.title) : null, statusSlot,
         el("h2", { text: s.title }),
         el("span", { class: "muted", text: ownerName(s) }),
         el("p", { class: "desc", text: s.description || "Chưa có mô tả." }),

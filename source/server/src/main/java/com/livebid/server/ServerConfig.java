@@ -135,6 +135,11 @@ public final class ServerConfig {
         return Path.of(getString("http.webRoot", "web"));
     }
 
+    /** Thư mục lưu ảnh đại diện của phiên. */
+    public Path imageDir() {
+        return Path.of(getString("http.imageDir", "./data/images"));
+    }
+
     public String settlementRmiHost() {
         return getString("settlement.rmiHost", "127.0.0.1");
     }

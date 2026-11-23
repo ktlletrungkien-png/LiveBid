@@ -2,6 +2,7 @@ package com.livebid.tests.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
@@ -28,6 +29,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -46,6 +48,9 @@ class RestApiTest {
     @TempDir
     Path webRoot;
 
+    @TempDir
+    Path imageDir;
+
     private BusinessExecutor executor;
     private AuthServiceImpl auth;
     private HttpGateway gateway;
@@ -63,7 +68,7 @@ class RestApiTest {
                 Clock.systemUTC(), AuctionSettings.defaults());
         auth = new AuthServiceImpl(executor, usersRepo, HASHER, Clock.systemUTC());
         Files.writeString(webRoot.resolve("index.html"), "<h1>LiveBid</h1>");
-        gateway = new HttpGateway(new HttpGateway.Settings(0, webRoot), auth, service, Optional::empty);
+        gateway = new HttpGateway(new HttpGateway.Settings(0, webRoot, imageDir), auth, service, Optional::empty);
         gateway.start();
     }
 
@@ -314,6 +319,107 @@ class RestApiTest {
 
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("LiveBid"));
+    }
+
+    // ---- Ảnh đại diện ----
+
+    /** Chữ ký PNG + vài byte: đủ để server nhận là PNG. */
+    private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H'};
+
+    @Test
+    void uploadImageThenServeItWithoutToken() throws Exception {
+        String user = userToken("nguoi_dung");
+
+        Resp uploaded = upload(user, PNG);
+        assertEquals(201, uploaded.status());
+        String imageId = uploaded.json().get("imageId").getAsString();
+        assertTrue(imageId.matches("[0-9a-f]{32}\\.png"), imageId);
+
+        // <img> không gửi được token nên GET ảnh là công khai
+        HttpResponse<byte[]> image = http.send(HttpRequest.newBuilder(uri("/api/images/" + imageId)).build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, image.statusCode());
+        assertEquals("image/png", image.headers().firstValue("Content-Type").orElse(""));
+        assertArrayEquals(PNG, image.body());
+
+        assertEquals(404, call("GET", "/api/images/" + "0".repeat(32) + ".png", null, null).status());
+        assertEquals(404, call("GET", "/api/images/..%2Fauction.db", null, null).status());
+    }
+
+    @Test
+    void rejectsInvalidImageUploads() throws Exception {
+        String user = userToken("nguoi_dung");
+
+        assertEquals(401, upload(null, PNG).status());
+
+        Resp notImage = upload(user, "<script>alert(1)</script>".getBytes());
+        assertEquals(400, notImage.status());
+        assertEquals("VALIDATION_ERROR", errorCode(notImage));
+
+        byte[] tooBig = new byte[2 * 1024 * 1024 + 1];
+        System.arraycopy(PNG, 0, tooBig, 0, PNG.length);
+        assertEquals(400, upload(user, tooBig).status());
+
+        assertEquals(400, upload(user, new byte[0]).status());
+    }
+
+    @Test
+    void auctionImageIsKeptReplacedAndRemovedOnUpdate() throws Exception {
+        String admin = adminToken();
+        String first = upload(admin, PNG).json().get("imageId").getAsString();
+        String second = upload(admin, PNG).json().get("imageId").getAsString();
+
+        Map<String, Object> withImage = new HashMap<>(draft("Tranh sơn dầu"));
+        withImage.put("imageId", first);
+        JsonObject created = call("POST", "/api/auctions", admin, withImage).json();
+        long id = created.get("auctionId").getAsLong();
+        assertEquals(first, created.get("imageId").getAsString());
+
+        // Không gửi imageId (như client Swing) -> giữ ảnh cũ
+        JsonObject kept = update(admin, id, created.get("version").getAsLong(), draft("Tranh sơn dầu"));
+        assertEquals(first, kept.get("imageId").getAsString());
+
+        Map<String, Object> replace = new HashMap<>(draft("Tranh sơn dầu"));
+        replace.put("imageId", second);
+        JsonObject replaced = update(admin, id, kept.get("version").getAsLong(), replace);
+        assertEquals(second, replaced.get("imageId").getAsString());
+
+        Map<String, Object> remove = new HashMap<>(draft("Tranh sơn dầu"));
+        remove.put("removeImage", true);
+        JsonObject removed = update(admin, id, replaced.get("version").getAsLong(), remove);
+        assertFalse(removed.has("imageId") && !removed.get("imageId").isJsonNull());
+    }
+
+    @Test
+    void cannotAttachUnknownOrMalformedImage() throws Exception {
+        String admin = adminToken();
+
+        Map<String, Object> unknown = new HashMap<>(draft("Phiên"));
+        unknown.put("imageId", "0".repeat(32) + ".png");
+        Resp r1 = call("POST", "/api/auctions", admin, unknown);
+        assertEquals(400, r1.status());
+        assertEquals("VALIDATION_ERROR", errorCode(r1));
+
+        Map<String, Object> malformed = new HashMap<>(draft("Phiên"));
+        malformed.put("imageId", "../../data/auction.db");
+        assertEquals(400, call("POST", "/api/auctions", admin, malformed).status());
+    }
+
+    private Resp upload(String token, byte[] data) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri("/api/images"))
+                .header("Content-Type", "application/octet-stream")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(data));
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return new Resp(response.statusCode(), response.body());
+    }
+
+    private JsonObject update(String token, long id, long version, Map<String, Object> draft) throws Exception {
+        Resp r = call("PUT", "/api/auctions/" + id, token, Map.of("expectedVersion", version, "draft", draft));
+        assertEquals(200, r.status(), r.body());
+        return r.json();
     }
 
     // ---- Tiện ích ----

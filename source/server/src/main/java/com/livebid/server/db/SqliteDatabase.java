@@ -38,7 +38,8 @@ public final class SqliteDatabase implements AutoCloseable {
     /** Danh sách migration theo thứ tự tăng dần. Thêm bản mới vào cuối, không sửa bản cũ đã chạy. */
     private static final List<MigrationStep> MIGRATIONS = List.of(
             new MigrationStep("db/V1__init.sql", false),
-            new MigrationStep("db/V2__auction_approval.sql", true));
+            new MigrationStep("db/V2__auction_approval.sql", true),
+            new MigrationStep("db/V3__auction_image.sql", false));
 
     private static final Pattern VERSION_PATTERN = Pattern.compile("V(\\d+)__");
 
