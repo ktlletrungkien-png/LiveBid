@@ -19,6 +19,7 @@ import com.livebid.server.http.HttpGateway;
 import com.livebid.server.settlement.RmiSettlementLocator;
 import com.livebid.server.settlement.SettlementClient;
 import com.livebid.server.tcp.AuctionCommands;
+import com.livebid.server.tcp.ImageCommands;
 import com.livebid.server.tcp.AuthCommands;
 import com.livebid.server.tcp.MessageRouter;
 import com.livebid.server.tcp.TcpServer;
@@ -97,10 +98,21 @@ public final class ServerMain {
         AuctionScheduler scheduler = new AuctionScheduler(auctions, AuctionScheduler.DEFAULT_TICK_MILLIS);
         scheduler.start();
 
+        // --- HTTP: REST /api + trang web tĩnh. Dùng chung auth và auctions với TCP.
+        HttpGateway http = new HttpGateway(new HttpGateway.Settings(config.httpPort(), config.webRoot(), config.imageDir()),
+                auth, auctions, settlementClient::fetchSummary);
+
         // --- TCP
         MessageRouter router = new MessageRouter(clock);
         new AuthCommands(auth, auctions).registerTo(router);
         new AuctionCommands(auctions).registerTo(router);
+        new ImageCommands(http.uploadTickets(), http::port).registerTo(router);
+
+        // WebSocket /ws dùng chung router với TCP; đóng kết nối thì rời phòng như TCP. Phải gọi trước start().
+        // HTTP mở trước TCP để SERVER_INFO luôn trả được cổng HTTP.
+        http.enableWebSocket(router, auctions::onDisconnect);
+        http.start();
+
         TcpServer tcp = new TcpServer(new TcpServer.Settings(
                 config.host(),
                 config.tcpPort(),
@@ -109,13 +121,6 @@ public final class ServerMain {
                 config.maxConnections()), router);
         tcp.setDisconnectListener(auctions::onDisconnect);
         tcp.start();
-
-        // --- HTTP: REST /api + trang web tĩnh. Dùng chung auth và auctions với TCP.
-        HttpGateway http = new HttpGateway(new HttpGateway.Settings(config.httpPort(), config.webRoot(), config.imageDir()),
-                auth, auctions, settlementClient::fetchSummary);
-        // WebSocket /ws dùng chung router với TCP; đóng kết nối thì rời phòng như TCP. Phải gọi trước start().
-        http.enableWebSocket(router, auctions::onDisconnect);
-        http.start();
 
         // --- UDP discovery
         UdpDiscoveryResponder discovery = openDiscovery(config);

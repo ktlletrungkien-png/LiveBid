@@ -1,5 +1,6 @@
 package com.livebid.client.ui;
 
+import com.livebid.client.image.ClientImages;
 import com.livebid.client.room.MoneyFormat;
 import com.livebid.common.dto.AuctionStatus;
 import com.livebid.common.dto.AuctionView;
@@ -18,7 +19,7 @@ import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 
 /**
- * Thẻ một phiên trong lưới "Phiên đấu giá" (giống {@code .card.auction} trên web): nhãn trạng thái, tên,
+ * Thẻ một phiên trong lưới "Phiên đấu giá" (giống {@code .card.auction} trên web): ảnh đại diện, nhãn trạng thái, tên,
  * ban tổ chức hoặc người đăng, giá, đồng hồ đếm ngược và nút vào phòng.
  *
  * <p>Đồng hồ do {@link #tick(long)} cập nhật; người gọi truyền giờ server ước tính. Dưới 10 phút thì đồng hồ
@@ -30,17 +31,27 @@ final class AuctionCard extends UiTheme.Card {
 
     private static final long URGENT_MILLIS = 10 * 60_000L;
 
+    /** Chiều cao khung ảnh trên thẻ (thẻ rộng tối thiểu ~290px nên gần tỉ lệ 4:3 sau khi trừ lề). */
+    private static final int THUMB_HEIGHT = 170;
+
     private final AuctionView auction;
     private final JLabel timerLabel = new JLabel();
 
     /**
-     * @param edit nút "Sửa phiên" (chỉ ADMIN, phiên SCHEDULED); {@code null} thì không hiện
+     * @param edit   nút "Sửa phiên" (chỉ ADMIN, phiên SCHEDULED); {@code null} thì không hiện
+     * @param images nguồn ảnh đại diện
      */
-    AuctionCard(AuctionView auction, Consumer<AuctionView> open, Consumer<AuctionView> edit, Role role) {
+    AuctionCard(AuctionView auction, Consumer<AuctionView> open, Consumer<AuctionView> edit, Role role,
+            ClientImages images) {
         super(UiTheme.CANVAS, UiTheme.HAIRLINE, 12);
         this.auction = auction;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        ImageThumb thumb = new ImageThumb(images, 250, THUMB_HEIGHT);
+        thumb.show(auction.imageId());
+        add(thumb);
+        add(Box.createVerticalStrut(14));
 
         JPanel tagRow = row(new BorderLayout());
         tagRow.add(UiTheme.statusTag(auction.status()), BorderLayout.WEST);

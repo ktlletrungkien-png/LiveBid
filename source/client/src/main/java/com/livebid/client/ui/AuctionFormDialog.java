@@ -1,5 +1,7 @@
 package com.livebid.client.ui;
 
+import com.livebid.client.image.ClientImages;
+import com.livebid.client.image.ImageFiles;
 import com.livebid.client.room.AuctionForm;
 import com.livebid.common.dto.AuctionDraft;
 import com.livebid.common.dto.AuctionView;
@@ -14,6 +16,12 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
+import javax.swing.JFileChooser;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Optional;
@@ -39,6 +47,10 @@ import javax.swing.border.EmptyBorder;
  * <p><b>USER</b> đăng phiên: giờ bắt đầu phải cách hiện tại ít nhất {@value #USER_LEAD_MINUTES} phút và phiên
  * được quản trị viên duyệt trước khi lên sàn. <b>ADMIN</b> không bị giới hạn này.
  *
+ * <p>Ảnh đại diện (không bắt buộc): chọn file là tải lên ngay để lấy mã ảnh, có xem trước và nút bỏ ảnh;
+ * không cho lưu khi ảnh còn đang tải. Khi sửa mà không đụng tới ảnh thì bản nháp không mang trường ảnh, nên
+ * server giữ ảnh cũ.
+ *
  * <p>Hộp thoại chỉ thu thập dữ liệu: việc gọi {@code CREATE_AUCTION}/{@code UPDATE_AUCTION} do
  * {@link MainFrame} làm để giữ một chỗ xử lý lỗi nghiệp vụ.
  */
@@ -62,13 +74,26 @@ final class AuctionFormDialog extends JDialog {
     private final JSpinner endsAtSpinner;
     private final JLabel messageLabel = new JLabel(" ");
     private final Role role;
+    private final transient ClientImages images;
+    /** Ảnh của phiên lúc mở form (null khi tạo mới hoặc chưa có ảnh) và ảnh đang chọn. */
+    private final String initialImageId;
+    private String imageId;
+    private final ImageThumb imagePreview;
+    private final JButton chooseImageButton = UiTheme.secondary("Chọn ảnh");
+    private final JButton removeImageButton = UiTheme.secondary("Bỏ ảnh");
+    private final JLabel imageStatus = UiTheme.muted(" ");
+    private boolean uploading;
 
     private AuctionDraft result;
 
     private AuctionFormDialog(Window owner, String heading, AuctionView existing, long now, Role role,
-            String submitLabel) {
+            String submitLabel, ClientImages images) {
         super(owner, heading, Dialog.ModalityType.APPLICATION_MODAL);
         this.role = role;
+        this.images = images;
+        this.initialImageId = existing == null ? null : existing.imageId();
+        this.imageId = initialImageId;
+        this.imagePreview = new ImageThumb(images, 220, 140);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
         if (existing == null) {
@@ -117,6 +142,15 @@ final class AuctionFormDialog extends JDialog {
 
         cancelButton.addActionListener(e -> dispose());
         saveButton.addActionListener(e -> save());
+        chooseImageButton.addActionListener(e -> chooseImage());
+        removeImageButton.addActionListener(e -> {
+            imageId = null;
+            imagePreview.showPreview(null, null);
+            imageStatus.setText(" ");
+            updateImageButtons();
+        });
+        imagePreview.show(imageId);
+        updateImageButtons();
         getRootPane().setDefaultButton(saveButton);
 
         setContentPane(content);
@@ -131,16 +165,18 @@ final class AuctionFormDialog extends JDialog {
      * @param owner cửa sổ cha (có thể {@code null})
      * @param now   giờ hiện tại (epoch ms) để đặt giờ mặc định và kiểm tra tương lai
      * @param role  vai trò người đăng: USER bị giới hạn giờ bắt đầu và phải chờ duyệt
+     * @param images nguồn ảnh (tải ảnh lên, xem trước)
      */
-    static Optional<AuctionDraft> showCreate(Window owner, long now, Role role) {
+    static Optional<AuctionDraft> showCreate(Window owner, long now, Role role, ClientImages images) {
         String submit = role == Role.ADMIN ? "Tạo phiên" : "Gửi phiên";
-        return new AuctionFormDialog(owner, "Đăng phiên đấu giá", null, now, role, submit).open();
+        return new AuctionFormDialog(owner, "Đăng phiên đấu giá", null, now, role, submit, images).open();
     }
 
     /** Mở hộp thoại sửa phiên (ADMIN sửa phiên SCHEDULED, USER sửa phiên của mình đang chờ duyệt). */
-    static Optional<AuctionDraft> showEdit(Window owner, AuctionView auction, long now, Role role) {
+    static Optional<AuctionDraft> showEdit(Window owner, AuctionView auction, long now, Role role,
+            ClientImages images) {
         return new AuctionFormDialog(owner, "Sửa phiên #" + auction.auctionId(), auction, now, role,
-                "Lưu thay đổi").open();
+                "Lưu thay đổi", images).open();
     }
 
     private Optional<AuctionDraft> open() {
@@ -172,7 +208,93 @@ final class AuctionFormDialog extends JDialog {
         gbc.gridwidth = 2;
         gbc.insets = new Insets(8, 0, 0, 0);
         form.add(UiTheme.muted("Tiền nhập như 280000, 280.000 hoặc 280 000."), gbc);
+
+        gbc.insets = new Insets(6, 0, 2, 0);
+        addField(form, gbc, row + 1, "Ảnh đại diện (không bắt buộc)", buildImagePanel());
         return form;
+    }
+
+    private JPanel buildImagePanel() {
+        JPanel panel = new JPanel(new BorderLayout(14, 0));
+        panel.setOpaque(false);
+        panel.add(imagePreview, BorderLayout.WEST);
+
+        JPanel side = new JPanel();
+        side.setOpaque(false);
+        side.setLayout(new javax.swing.BoxLayout(side, javax.swing.BoxLayout.Y_AXIS));
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        buttons.setOpaque(false);
+        buttons.setAlignmentX(LEFT_ALIGNMENT);
+        buttons.add(chooseImageButton);
+        buttons.add(javax.swing.Box.createHorizontalStrut(8));
+        buttons.add(removeImageButton);
+        side.add(buttons);
+        side.add(javax.swing.Box.createVerticalStrut(8));
+        JLabel hint = UiTheme.muted("JPEG, PNG hoặc WebP, tối đa 2 MB.");
+        hint.setAlignmentX(LEFT_ALIGNMENT);
+        side.add(hint);
+        side.add(javax.swing.Box.createVerticalStrut(4));
+        imageStatus.setAlignmentX(LEFT_ALIGNMENT);
+        side.add(imageStatus);
+        panel.add(side, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void updateImageButtons() {
+        chooseImageButton.setText(imageId == null ? "Chọn ảnh" : "Đổi ảnh");
+        chooseImageButton.setEnabled(!uploading);
+        removeImageButton.setVisible(imageId != null);
+        removeImageButton.setEnabled(!uploading);
+    }
+
+    /** Chọn file, kiểm tra nhanh, hiện xem trước rồi tải lên; thành công thì ghi nhận mã ảnh. */
+    private void chooseImage() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Chọn ảnh đại diện");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new FileNameExtensionFilter("Ảnh (JPEG, PNG, WebP)", ImageFiles.EXTENSIONS));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        File file = chooser.getSelectedFile();
+        try {
+            ImageFiles.check(file.getName(), file.length());
+        } catch (RuntimeException e) {
+            imageStatus.setForeground(UiTheme.RUBY);
+            imageStatus.setText(e.getMessage());
+            return;
+        }
+        imagePreview.showPreview(readPreview(file), "Không xem trước được");
+
+        uploading = true;
+        updateImageButtons();
+        imageStatus.setForeground(UiTheme.INK_MUTE);
+        imageStatus.setText("Đang tải ảnh lên...");
+        String previous = imageId;
+        images.upload(file.toPath(), uploadedId -> {
+            uploading = false;
+            imageId = uploadedId;
+            imageStatus.setForeground(UiTheme.SUCCESS);
+            imageStatus.setText("Đã tải ảnh lên.");
+            updateImageButtons();
+        }, error -> {
+            uploading = false;
+            imageStatus.setForeground(UiTheme.RUBY);
+            imageStatus.setText(error);
+            imagePreview.showPreview(null, null);
+            imagePreview.show(previous); // quay về ảnh trước đó
+            updateImageButtons();
+        });
+    }
+
+    /** Ảnh xem trước đã thu nhỏ; {@code null} nếu Java không đọc được file. */
+    private static BufferedImage readPreview(File file) {
+        try {
+            BufferedImage image = ImageIO.read(file);
+            return image == null ? null : ImageFiles.shrink(image, 480);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
     }
 
     private static int addField(JPanel form, GridBagConstraints gbc, int row, String label, Component field) {
@@ -214,15 +336,30 @@ final class AuctionFormDialog extends JDialog {
                 throw new IllegalArgumentException(
                         "Giờ bắt đầu phải cách hiện tại ít nhất " + USER_LEAD_MINUTES + " phút");
             }
-            result = AuctionForm.toDraft(titleField.getText(), descriptionArea.getText(),
+            if (uploading) {
+                throw new IllegalArgumentException("Ảnh đang được tải lên, vui lòng đợi");
+            }
+            result = withImage(AuctionForm.toDraft(titleField.getText(), descriptionArea.getText(),
                     startingPriceField.getText(), incrementField.getText(),
-                    startsAt, valueOf(endsAtSpinner), now);
+                    startsAt, valueOf(endsAtSpinner), now));
         } catch (IllegalArgumentException e) {
             messageLabel.setText(e.getMessage());
             pack();
             return;
         }
         dispose();
+    }
+
+    /**
+     * Gắn ảnh vào bản nháp theo quy tắc của server: không đổi ảnh thì không gửi gì (server giữ ảnh cũ),
+     * đổi thì gửi {@code imageId}, bỏ thì gửi {@code removeImage}.
+     */
+    private AuctionDraft withImage(AuctionDraft draft) {
+        if (java.util.Objects.equals(imageId, initialImageId)) {
+            return draft;
+        }
+        return new AuctionDraft(draft.title(), draft.description(), draft.startingPrice(), draft.minIncrement(),
+                draft.startsAt(), draft.endsAt(), imageId, imageId == null);
     }
 
     private static JSpinner dateSpinner(long value) {

@@ -22,6 +22,7 @@ public final class RoomState {
     private long version = -1;
     private String title = "";
     private String description = "";
+    private String imageId;
     private AuctionStatus status;
     private long startingPrice;
     private long minIncrement;
@@ -58,6 +59,7 @@ public final class RoomState {
         version = view.version();
         title = view.title() == null ? "" : view.title();
         description = view.description() == null ? "" : view.description();
+        imageId = view.imageId();
         status = view.status();
         startingPrice = view.startingPrice();
         minIncrement = view.minIncrement();
@@ -105,6 +107,11 @@ public final class RoomState {
 
     public String title() {
         return title;
+    }
+
+    /** Ảnh đại diện; {@code null} nếu phiên không có ảnh. */
+    public String imageId() {
+        return imageId;
     }
 
     public String description() {

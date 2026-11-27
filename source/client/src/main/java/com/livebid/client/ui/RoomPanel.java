@@ -2,6 +2,7 @@ package com.livebid.client.ui;
 
 import com.google.gson.JsonElement;
 import com.google.gson.reflect.TypeToken;
+import com.livebid.client.image.ClientImages;
 import com.livebid.client.net.RemoteErrorException;
 import com.livebid.client.net.ServerConnection;
 import com.livebid.client.room.MoneyFormat;
@@ -75,6 +76,7 @@ final class RoomPanel extends JPanel {
     private final UserView user;
     private final Runnable onLeave;
     private final RoomState state = new RoomState();
+    private final ImageThumb imageThumb;
 
     private final JLabel titleLabel = new JLabel("Đang tải...");
     private final JLabel statusLabel = new JLabel();
@@ -105,8 +107,9 @@ final class RoomPanel extends JPanel {
     private boolean bidInFlight;
     private long autoFilledAmount = -1;
 
-    RoomPanel(ServerConnection connection, long auctionId, UserView user, Runnable onLeave) {
+    RoomPanel(ServerConnection connection, long auctionId, UserView user, Runnable onLeave, ClientImages images) {
         this.connection = connection;
+        this.imageThumb = new ImageThumb(images, 480, 220);
         this.auctionId = auctionId;
         this.user = user;
         this.onLeave = onLeave;
@@ -265,10 +268,15 @@ final class RoomPanel extends JPanel {
 
     private JPanel buildDetails() {
         JPanel card = UiTheme.card(new BorderLayout(0, 10), 24);
-        JPanel top = new JPanel(new BorderLayout(0, 6));
+        JPanel heading = new JPanel(new BorderLayout(0, 6));
+        heading.setOpaque(false);
+        heading.add(statusLabel, BorderLayout.NORTH);
+        heading.add(titleLabel, BorderLayout.CENTER);
+        JPanel top = new JPanel(new BorderLayout(0, 14));
         top.setOpaque(false);
-        top.add(statusLabel, BorderLayout.NORTH);
-        top.add(titleLabel, BorderLayout.CENTER);
+        imageThumb.setVisible(false); // chỉ hiện khi phiên có ảnh
+        top.add(imageThumb, BorderLayout.NORTH);
+        top.add(heading, BorderLayout.CENTER);
         card.add(top, BorderLayout.NORTH);
 
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
@@ -356,6 +364,8 @@ final class RoomPanel extends JPanel {
             return;
         }
         titleLabel.setText(state.title());
+        imageThumb.setVisible(state.imageId() != null);
+        imageThumb.show(state.imageId());
         descriptionArea.setText(state.description().isBlank() ? "(Không có mô tả)" : state.description());
         descriptionArea.setCaretPosition(0);
         priceCaptionLabel.setText(state.hasBids() ? "Giá đã được đặt:" : "Giá khởi điểm:");

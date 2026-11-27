@@ -18,6 +18,7 @@ import com.livebid.server.core.ClientChannel;
 import com.livebid.server.core.ServiceException;
 import com.livebid.server.core.UserPrincipal;
 import com.livebid.server.image.ImageStore;
+import com.livebid.server.image.UploadTickets;
 import com.livebid.server.tcp.MessageRouter;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
@@ -54,7 +55,8 @@ import org.slf4j.LoggerFactory;
  *       {@code {"error":{"code":"...","message":"...","details":{...}}}}.</li>
  *   <li>Xác thực: header {@code Authorization: Bearer <token>} cho mọi {@code /api/*} trừ
  *       {@code register}, {@code login} và {@code GET /api/images/{id}} (thẻ {@code <img>} không gửi được
- *       header; mã ảnh ngẫu nhiên 128 bit nên không đoán được).</li>
+ *       header; mã ảnh ngẫu nhiên 128 bit nên không đoán được). {@code POST /api/images} còn nhận vé tải ảnh
+ *       trong header {@value Protocol#UPLOAD_TICKET_HEADER} (client desktop xin vé qua TCP).</li>
  *   <li>Kết quả bất đồng bộ được trả bằng {@code ctx.future(...)}; <b>không</b> {@code join()} trên luồng HTTP.</li>
  * </ul>
  */
@@ -102,6 +104,7 @@ public final class HttpGateway implements AutoCloseable {
     private final AuctionService auctions;
     private final Supplier<Optional<SettlementSummaryDto>> stats;
     private final ImageStore images;
+    private final UploadTickets uploadTickets = new UploadTickets(java.time.Clock.systemUTC());
     /** Kênh WebSocket đang mở, khóa theo mã session của Jetty. */
     private final Map<String, WsChannel> channels = new ConcurrentHashMap<>();
     private MessageRouter router;
@@ -166,6 +169,11 @@ public final class HttpGateway implements AutoCloseable {
         log.info("HTTP/REST lắng nghe tại cổng {}", app.port());
     }
 
+    /** Kho vé tải ảnh dùng chung với lệnh TCP {@code REQUEST_UPLOAD_TICKET}. */
+    public UploadTickets uploadTickets() {
+        return uploadTickets;
+    }
+
     /** Cổng thực tế sau {@link #start()} (hữu ích khi cấu hình cổng 0). */
     public int port() {
         if (app == null) {
@@ -225,6 +233,13 @@ public final class HttpGateway implements AutoCloseable {
             return;
         }
         if (ctx.method() == HandlerType.GET && path.startsWith("/api/images/")) {
+            return;
+        }
+        String ticket = ctx.header(Protocol.UPLOAD_TICKET_HEADER);
+        if (ticket != null && ctx.method() == HandlerType.POST && path.equals("/api/images")) {
+            UserPrincipal owner = uploadTickets.consume(ticket).orElseThrow(() ->
+                    new ServiceException(ErrorCode.UNAUTHORIZED, "Vé tải ảnh không hợp lệ hoặc đã hết hạn"));
+            ctx.attribute(ATTR_PRINCIPAL, owner);
             return;
         }
         String header = ctx.header("Authorization");

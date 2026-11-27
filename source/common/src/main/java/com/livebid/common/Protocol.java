@@ -19,6 +19,9 @@ public final class Protocol {
     public static final int DEFAULT_RMI_PORT = 1099;
 
     public static final String DISCOVERY_REQUEST = "LIVEBID_DISCOVER";
+
+    /** Header mang vé tải ảnh ({@code REQUEST_UPLOAD_TICKET}) thay cho {@code Authorization: Bearer}. */
+    public static final String UPLOAD_TICKET_HEADER = "X-Upload-Ticket";
     public static final String RMI_SETTLEMENT_NAME = "SettlementService";
 
     private Protocol() {

@@ -24,6 +24,7 @@
 
         <javalin.version>6.4.0</javalin.version>
         <gson.version>2.11.0</gson.version>
+        <twelvemonkeys.version>3.12.0</twelvemonkeys.version>
         <sqlite.version>3.47.1.0</sqlite.version>
         <slf4j.version>2.0.16</slf4j.version>
         <junit.version>5.11.4</junit.version>
@@ -35,6 +36,11 @@
                 <groupId>com.livebid</groupId>
                 <artifactId>common</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.twelvemonkeys.imageio</groupId>
+                <artifactId>imageio-webp</artifactId>
+                <version>${twelvemonkeys.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.javalin</groupId>

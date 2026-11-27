@@ -96,6 +96,15 @@ public final class ServerConnection implements AutoCloseable {
         return state.get() == ConnectionState.CONNECTED;
     }
 
+    /** IP của server đang kết nối (đã phân giải); {@code null} khi chưa kết nối. */
+    public String remoteHost() {
+        Socket current = socket;
+        if (current == null || current.getInetAddress() == null) {
+            return null;
+        }
+        return current.getInetAddress().getHostAddress();
+    }
+
     /**
      * Mở kết nối TCP. Chỉ gọi khi đang {@link ConnectionState#DISCONNECTED}.
      *

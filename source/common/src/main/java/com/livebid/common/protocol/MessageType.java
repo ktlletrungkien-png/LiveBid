@@ -30,6 +30,10 @@ public enum MessageType {
     GET_PENDING_AUCTIONS(false),
     APPROVE_AUCTION(false),
     REJECT_AUCTION(false),
+    /** Thông tin server cho client desktop (cổng HTTP để tải ảnh). Không cần đăng nhập. */
+    SERVER_INFO(false),
+    /** Xin vé dùng một lần để tải ảnh lên qua {@code POST /api/images} (client desktop không có token REST). */
+    REQUEST_UPLOAD_TICKET(false),
 
     // ---- Sự kiện (server đẩy) ----
     AUCTION_STARTED(true),

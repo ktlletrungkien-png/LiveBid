@@ -1,6 +1,7 @@
 package com.livebid.client.ui;
 
 import com.google.gson.reflect.TypeToken;
+import com.livebid.client.image.ClientImages;
 import com.livebid.client.net.ServerConnection;
 import com.livebid.common.dto.AuctionSort;
 import com.livebid.common.dto.AuctionStatus;
@@ -51,6 +52,7 @@ final class AuctionListPanel extends JPanel {
     private final UserView user;
     private final LongConsumer openAuction;
     private final Consumer<AuctionView> editAuction;
+    private final ClientImages images;
 
     private final CardGrid grid = new CardGrid();
     private final JLabel totalLabel = UiTheme.muted(" ");
@@ -70,8 +72,9 @@ final class AuctionListPanel extends JPanel {
     private long clockOffset;
 
     AuctionListPanel(ServerConnection connection, UserView user, LongConsumer openAuction,
-            Consumer<AuctionView> editAuction) {
+            Consumer<AuctionView> editAuction, ClientImages images) {
         this.connection = connection;
+        this.images = images;
         this.user = user;
         this.openAuction = openAuction;
         this.editAuction = editAuction;
@@ -225,7 +228,7 @@ final class AuctionListPanel extends JPanel {
         }
         for (AuctionView auction : items) {
             grid.add(new AuctionCard(auction, a -> openAuction.accept(a.auctionId()),
-                    editAuction, user.role()));
+                    editAuction, user.role(), images));
         }
         if (items.isEmpty()) {
             messageLabel.setText("Chưa có phiên nào trong mục này.");

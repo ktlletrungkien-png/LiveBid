@@ -1,5 +1,6 @@
 package com.livebid.client.ui;
 
+import com.livebid.client.image.ClientImages;
 import com.livebid.client.net.ServerConnection;
 import com.livebid.common.dto.AuctionView;
 import com.livebid.common.dto.Role;
@@ -31,11 +32,11 @@ final class AuctionHubPanel extends JPanel {
     private View current = View.LIST;
 
     AuctionHubPanel(ServerConnection connection, UserView user, LongConsumer openAuction,
-            Consumer<AuctionView> editAuction) {
+            Consumer<AuctionView> editAuction, ClientImages images) {
         setLayout(cards);
         setOpaque(false);
 
-        listPanel = new AuctionListPanel(connection, user, openAuction, editAuction);
+        listPanel = new AuctionListPanel(connection, user, openAuction, editAuction, images);
         myAuctionsPanel = new MyAuctionsPanel(connection, user, openAuction, editAuction);
         adminPanel = user.role() == Role.ADMIN ? new AdminPanel(connection, openAuction) : null;
 

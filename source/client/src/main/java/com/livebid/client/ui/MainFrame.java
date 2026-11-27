@@ -1,6 +1,8 @@
 package com.livebid.client.ui;
 
 import com.livebid.client.ClientConfig;
+import com.livebid.client.image.ClientImages;
+import com.livebid.client.image.HttpImageTransport;
 import com.livebid.client.net.ConnectionState;
 import com.livebid.client.net.MulticastListener;
 import com.livebid.client.net.ReconnectPolicy;
@@ -87,6 +89,7 @@ public final class MainFrame extends JFrame {
 
     private final ClientConfig config;
     private final ServerConnection connection = new ServerConnection();
+    private final ClientImages images;
     private final CardLayout cards = new CardLayout();
     private final JPanel cardPanel = new JPanel(cards);
     private final JLabel statusLabel = new JLabel("Chưa kết nối");
@@ -124,6 +127,7 @@ public final class MainFrame extends JFrame {
     public MainFrame(ClientConfig config) {
         super("LiveBid - Desktop client");
         this.config = config;
+        this.images = new ClientImages(new HttpImageTransport(connection));
 
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -202,7 +206,7 @@ public final class MainFrame extends JFrame {
         openRoomId = null;
         closeRoom();
         if (hubPanel == null) {
-            hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom, this::editAuction);
+            hubPanel = new AuctionHubPanel(connection, currentUser, this::openRoom, this::editAuction, images);
             cardPanel.add(hubPanel, CARD_LIST);
             hubPanel.show(activeView);
         } else {
@@ -240,7 +244,7 @@ public final class MainFrame extends JFrame {
         }
         closeRoom();
         openRoomId = auctionId;
-        RoomPanel panel = new RoomPanel(connection, auctionId, currentUser, this::showList);
+        RoomPanel panel = new RoomPanel(connection, auctionId, currentUser, this::showList, images);
         roomPanel = panel;
         cardPanel.add(panel, CARD_ROOM);
         cards.show(cardPanel, CARD_ROOM);
@@ -254,7 +258,7 @@ public final class MainFrame extends JFrame {
             return;
         }
         Optional<AuctionDraft> draft = AuctionFormDialog.showCreate(this, System.currentTimeMillis(),
-                currentUser.role());
+                currentUser.role(), images);
         if (draft.isEmpty()) {
             return;
         }
@@ -280,7 +284,7 @@ public final class MainFrame extends JFrame {
             return;
         }
         Optional<AuctionDraft> draft = AuctionFormDialog.showEdit(this, auction, System.currentTimeMillis(),
-                currentUser.role());
+                currentUser.role(), images);
         if (draft.isEmpty()) {
             return;
         }
@@ -385,6 +389,7 @@ public final class MainFrame extends JFrame {
             case CONNECTING -> setStatus("Đang kết nối...");
             case CONNECTED -> setStatus("Đã kết nối tới server");
             case DISCONNECTED -> {
+                images.reset(); // lần kết nối sau có thể tới server/cổng HTTP khác
                 if (closing || retryInProgress) {
                     return;
                 }
